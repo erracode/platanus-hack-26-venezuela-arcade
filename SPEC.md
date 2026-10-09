@@ -11,7 +11,7 @@
 Build a **2.5D isometric, simultaneous-turn tactics game** in **Phaser 3.87**, fully procedural
 (no image/audio files), written as a **single vanilla `game.js` ≤ 50 KB minified** for the
 **Platanus Hack 26 "Arcade Challenge"**, played on a **physical arcade cabinet (joystick + buttons,
-no mouse)**. One mecha unit per side (P1 cyan, CPU/P2 magenta). Each turn both sides secretly
+no mouse)**. One mecha unit per side (P1 cyan, CPU magenta). Each turn both sides secretly
 program a Move + Action; actions resolve **simultaneously** with sword-clashes and a "Catatumbo
 lightning" visual effect over a neon re-imagining of Lake Maracaibo.
 **Mode:** `single_player` only (vs CPU). Local 2P is **out of scope**: on a shared screen each
@@ -21,8 +21,9 @@ player sees the other's programmed plan, which breaks the simultaneous hidden-in
 
 ## 1. Hackathon rules (HARD — verified against the official template)
 
-Source: official starter repo `erracode/platanus-hack-26-venezuela-arcade` (forked). Its
-`AGENTS.md` / `README.md` are the authority; this table is a summary.
+Source: official starter repo `platanus-hack/platanus-hack-26-venezuela-arcade` (our fork:
+`erracode/platanus-hack-26-venezuela-arcade`). Its `AGENTS.md` / `README.md` are the authority;
+this table is a summary.
 
 | Rule | Detail |
 |------|--------|
@@ -56,12 +57,24 @@ local testing keys. Game logic reads arcade codes (`P1_U`, `P1_1`, …), never r
 
 | Planning step | Joystick | `_1` | `_2` | `_3` | `_4` |
 |---------------|----------|------|------|------|------|
-| 1. Movement ring | pick direction N/E/S/W (ghost previews it) | `MOVE` there | `PIVOT` to face it | *hold* | — |
+| 1. Movement ring | pick direction (ghost previews it; see stick ↔ grid below) | `MOVE` there | `PIVOT` to face it | *hold* | — |
 | 2. Combat ring | — | `SLASH` (locks turn) | `PARRY` (locks turn) | none (locks turn) | back to step 1 |
 | Clash prompt | — | `THRUST` | `PARRY` | `FEINT` | — |
 | Menus / game over | navigate | confirm | — | — | — |
 
 `START1` starts / restarts a match.
+
+**Stick ↔ grid (decided, iso board):** projection `screenX = (x + y)`, `screenY = (y − x)` puts
+grid **N = up-left** (strait/bridge at the back-left), **E = up-right** (palafitos), **S = down-right**,
+**W = down-left**; the lake body faces the viewer. The stick is rotated 45° clockwise on screen:
+`P1_U` → up-right (grid E) · `P1_R` → down-right (S) · `P1_D` → down-left (W) · `P1_L` → up-left (N).
+During the Movement step the 4 neighbour cells show ↑ → ↓ ← arrow glyphs so the player sees
+exactly where each stick direction goes.
+
+**Turn timing:** programming window `TURN_MS` (default 15 s, constant). On timeout, whatever is
+selected so far is locked; anything unselected defaults to *hold* / *none*. Clash window
+`CLASH_MS` (default 4 s); timeout → random pick. The CPU plans from the **state only** — it never
+reads the player's plan.
 
 ---
 
@@ -72,8 +85,11 @@ local testing keys. Game logic reads arcade codes (`P1_U`, `P1_1`, …), never r
 - **Setting:** neon/futuristic over the **Lago de Maracaibo**
 - **Board:** the playable grid **is the silhouette of the Lake** (oval + northern strait); outside
   the lake is void. See **§2.1 Lake Maracaibo map** for the exact matrix, tile codes and
-  walkability. Grid size is **9×11** (open to change — see §2.1).
-- **Units:** one mecha per side. P1 = `#00FFFF` (cyan); CPU / P2 = `#FF0055` (magenta)
+  walkability. Board is **14×20** (land slab with the lake carved in — see §2.1).
+- **Units:** one mecha per side. P1 = `#00FFFF` (cyan); CPU = `#FF0055` (magenta).
+  Start: P1 at `(7, 15)` facing N (south of the lake, nearer the viewer); CPU at `(6, 8)`
+  facing S (north of the lake). Both water cells, 8 steps apart.
+- **Field:** the bridge row and the lake south of it. Gulf + strait are scenery.
 - **Facing:** every mecha faces N/E/S/W (grid directions). Facing decides what `SLASH` hits and
   what `PARRY` covers.
 - **Turn loop:**
@@ -98,59 +114,63 @@ local testing keys. Game logic reads arcade codes (`P1_U`, `P1_1`, …), never r
 
 ### 2.1 Lake Maracaibo map (procedural, ~0 KB)
 
-The board **is the lake**: the playable grid traces the **silhouette of Lake Maracaibo** (a broad
-oval with a narrow strait at the north), and everything outside the lake is **void** — not part of
-the grid at all. One integer per tile keeps the whole map **well under 1 KB**.
+The board **is the lake**: the board is a rectangular **land slab** (green wire grid, not walkable) with
+the **Zulia layout** carved into it: Gulf of Venezuela across the north, a long narrow strait, the
+bridge at the strait's south end, and a kite-shaped lake body (narrow north, widest to the south,
+pointed south tip) shifted east, with most land to the west. One integer per tile keeps the whole map **well under 1 KB**.
 
 Tile codes:
 
 | Code | Tile | Walkable | Notes |
 |------|------|:--------:|-------|
 | `0` | Lake water | ✅ | the playable body; base isometric diamond |
-| `1` | Outside the lake (void / land) | ❌ | **not drawn as a tile**; only flat background |
-| `2` | Puente Gral. Rafael Urdaneta | ✅ | spans the northern strait; grants +DEF or +SPD |
-| `3` | Palafito / pilote (stilt) | ❌ | cover: blocks line-of-sight; on the east coast |
-| `4` | Catatumbo zone | ✅ | SW river mouth; raises crit / lightning chance |
+| `1` | Land | ❌ | flat green wire tiles; the board's front faces are an extruded slab (§3.1) |
+| `2` | Puente Gral. Rafael Urdaneta | ✅ | spans the northern strait; MVP: plain walkable (buff = stretch idea) |
+| `3` | Palafito / pilote (stilt) | ❌ | MVP: obstacle; stretch: blocks `RANGED` line-of-sight; east coast |
+| `4` | Catatumbo zone | ✅ | SW river mouth; MVP: plain walkable + yellow flicker; strikes = stretch |
+| `5` | Scenery water | ❌ | Gulf + strait north of the bridge: drawn dim, **not part of the field** |
 
 ```javascript
-// 0 water · 1 outside/void · 2 bridge · 3 palafito · 4 Catatumbo
-// 9 wide × 11 tall, north at the top. Shape = Lake Maracaibo silhouette.
-export const LAGO_MAP = [
-  [1, 1, 1, 1, 2, 2, 1, 1, 1], //  0  north: bridge over the Tablazo strait
-  [1, 1, 1, 0, 0, 0, 0, 1, 1], //  1  strait (narrow neck)
-  [1, 1, 0, 0, 0, 0, 0, 0, 1], //  2
-  [1, 0, 0, 0, 0, 0, 0, 0, 3], //  3  east coast — palafitos
-  [1, 0, 0, 0, 0, 0, 0, 0, 3], //  4  east coast — palafitos
-  [0, 0, 0, 0, 0, 0, 0, 0, 1], //  5  widest span
-  [0, 0, 0, 0, 0, 0, 0, 0, 1], //  6
-  [1, 0, 0, 0, 0, 0, 0, 0, 1], //  7
-  [1, 4, 0, 0, 0, 0, 0, 0, 1], //  8  SW — Catatumbo river mouth / lightning
-  [1, 1, 0, 0, 0, 0, 0, 0, 1], //  9
-  [1, 1, 1, 0, 0, 0, 1, 1, 1], // 10  south shore (rounded)
+// 0 water · 1 land · 2 bridge · 3 palafito · 4 Catatumbo · 5 scenery water (not walkable)
+// 14 wide × 20 tall, north at the top (drawn top-left). Traced from the real lake outline with the
+// gulf + strait compressed into scenery; the field is the bridge and everything south of it.
+// Plain script: no `export` (game.js is not a module). 114 walkable cells, all connected.
+const LAGO_MAP = [
+  [1, 1, 1, 1, 1, 5, 5, 5, 5, 5, 5, 5, 5, 5], //  0  Gulf of Venezuela (scenery)
+  [1, 1, 1, 1, 1, 5, 5, 5, 5, 5, 5, 5, 5, 5],
+  [1, 1, 1, 1, 1, 5, 5, 5, 1, 1, 1, 1, 1, 1], //  2  strait (scenery)
+  [1, 1, 1, 1, 1, 5, 5, 5, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1], //  4  bridge = north edge of the field
+  [1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1],
+  [1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1],
+  [1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1],
+  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1], //  8  lake body
+  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1],
+  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1],
+  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
+  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 1, 1], // 12  east coast palafito
+  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
+  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 1, 1],
+  [1, 1, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1], // 15  SW Catatumbo mouth
+  [1, 1, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
+  [1, 1, 1, 1, 4, 0, 0, 0, 0, 0, 0, 1, 1, 1],
+  [1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1], // 18  rounded south tip
+  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
 ];
-
-export const isWalkable = (x, y) => {
-  const t = LAGO_MAP[y]?.[x];
-  return t === 0 || t === 2 || t === 4;
-};
 ```
 
-Render each tile by its code as an isometric rhombus with `Graphics` (water animates a subtle
-brightness wave in `update()`); bridge tiles add grey/neon pillars, palafito tiles draw wood/metal
-prisms, Catatumbo tiles glow. **Only `0`/`2`/`3`/`4` cells become tiles** — `1` cells are left empty
-so the grid itself reads as the lake. **No images.**
+Rendering of each code follows the art direction in **§3.1** (wireframe). The map is static and
+drawn **once**; only `4` (Catatumbo flicker) animates, on the FX layer. **No images.**
 
 > **Feature placement (verified against sources):** oval body with a narrow **north** strait; the
 > **bridge** spans that strait (top); the **Catatumbo** river mouth + lightning sit on the
 > **southwest**; **palafitos** line the **east** coast.
 
-> **Open decision:** the shape above is **9×11 (65 walkable tiles)** so the lake actually *reads* as
-> a lake. Shrinking to 8×8/7×7 makes the silhouette blocky — the neck, palafitos and Catatumbo stop
-> being legible. Confirm size before phase 1 (recommended: keep ≥ 9 wide).
+> **Size (decided):** **14×20 board, TW×TH = 44×22** (≈ 748 px wide) — fills 800×600 with room
+> for HUD; 114 walkable tiles.
 
-> **Projection:** iso-projecting an N–S oval skews the silhouette diagonally. If lake
-> recognisability matters more than 2.5D, render the map **top-down** (flat rhombi) and keep only
-> the units + shadows as 2.5D.
+> **Projection (decided): isometric**, north (strait + bridge) at the **top-left**, lake body toward
+> the viewer (matches the approved concept sketch). Joystick mapping in §1.1 compensates.
 
 ### 2.2 Zone events — idea parking lot (NOT committed)
 
@@ -158,15 +178,15 @@ so the grid itself reads as the lake. **No images.**
 > the 50 KB limit. All effects must be **data-driven** (`{ tile, trigger, chance, effect }`) and use
 > **procedural VFX only** — no new art.
 
-**Proposed extra tile codes (reserved):** `5` = verdín / duckweed patch, `6` = oil slick.
+**Proposed extra tile codes (reserved):** `6` = verdín / duckweed patch, `7` = oil slick.
 
 | Tile / zone | Trigger | Idea (RNG) | Status |
 |-------------|---------|-----------|--------|
 | `4` Catatumbo | end your move/action on it | `P%` chance a lightning bolt strikes → extra dmg or stun | idea |
 | `2` Puente | move onto | +DEF **or** +SPD | spec'd |
 | `3` Palafito | line-of-sight through it | blocks shots (cover) | spec'd |
-| `5` Verdín (duckweed) | start/end move on it | `P%` the move **fails** / you slip 1 cell / lose the turn | idea |
-| `6` Oil slick | stand on it | **refuel** → +1 energy / extra action charge | idea |
+| `6` Verdín (duckweed) | start/end move on it | `P%` the move **fails** / you slip 1 cell / lose the turn | idea |
+| `7` Oil slick | stand on it | **refuel** → +1 energy / extra action charge | idea |
 
 **More ideas (loose):**
 - **Storm cycle:** every N turns the Catatumbo "fires" as a *global* event (flashes all across the
@@ -187,10 +207,9 @@ so the grid itself reads as the lake. **No images.**
 - **Graphics only:** `Phaser.GameObjects.Graphics` → `fillRect`, `fillCircle`, `fillTriangle`,
   `fillPoints`, `lineBetween`, `strokePath`, `fillPath`, `slice` (radial menu), `arc`.
 - **Isometric projection:**
-  `screenX = (x - y) * (TILE_W / 2)`, `screenY = (x + y) * (TILE_H / 2)`
+  `screenX = (x + y) * (TILE_W / 2)`, `screenY = (y - x) * (TILE_H / 2)`
   (no inverse needed — there is no mouse; selection is joystick-driven).
-- **Joystick ↔ iso directions:** in iso, grid N/E/S/W are drawn as screen **diagonals**, so
-  "joystick up" must map to one grid direction consistently. Decide in P1 (see §8).
+- **Joystick ↔ iso directions:** fixed 45° rotation, see §1.1.
 - **Audio:** Web Audio API only — `OscillatorNode` (square/pulse for 8-bit timbre), `GainNode`
   ADSR envelopes, white noise via `AudioBuffer` + `Math.random()` for clashes and shots.
 - **Signature VFX:** "Relámpago del Catatumbo" — a canvas lightning bolt on critical clashes.
@@ -206,10 +225,10 @@ so the grid itself reads as the lake. **No images.**
   slabs may fill.
 - **Palette:** P1 cyan `#00FFFF` · CPU/P2 magenta `#FF0055` · coast/land/bridge phosphor green
   `#00FF88` · Catatumbo/impacts yellow `#FFFF00` · UI white `#FFFFFF` on black.
-- **Map:** water cells = cyan wire rhombi. Void cells (`1`) that touch the lake are drawn as a
-  **raised green wireframe coast** ring (non-walkable, context only); other void cells are not
-  drawn. Bridge (`2`) = cable-stayed towers + cables with `lineBetween` (Rafael Urdaneta is
-  cable-stayed). Palafitos (`3`) = small wire huts on stilts. Catatumbo (`4`) = yellow flicker.
+- **Map:** one rectangular board; its two front edges are extruded as a green slab. Land (`1`) =
+  flat green wire rhombi; water = cyan wire rhombi; a bright green **shoreline** is drawn on every
+  lake/land edge. Bridge (`2`) = white cable-stayed A-towers + double deck + cables (Rafael Urdaneta
+  is cable-stayed). Palafitos (`3`) = small wire huts on stilts. Catatumbo (`4`) = yellow flicker.
 - **Mechas:** angular wire silhouette (diamond head, trapezoid torso, shoulder blocks, legs) +
   a bright **facing chevron** on the base tile — facing must read at a glance.
 - **Ghost:** same mecha at alpha ≈ 0.35. **Threat tiles:** blinking red rhombi.
@@ -277,7 +296,7 @@ game.js
 > Full scope, action set, phase breakdown, milestones and Definition of Done live in
 > **`ROADMAP.md`**. Summary below.
 
-1. **Setup + isometric engine** — lake-shaped grid (`LAGO_MAP`, 9×11), palafito prisms, `toIso`/`toGrid`.
+1. **Setup + isometric engine** — land slab + carved lake (`LAGO_MAP`, 14×20), shoreline, bridge, palafitos, `toIso`.
 2. **Vector mecha + UI** — `drawMecha()` with facing, two-level radial menu, ghost + threat tiles.
 3. **Simultaneous turns + combat** — basic CPU AI, parallel-tween resolution, clash, combat table.
 4. **Effects + audio + HUD** — Catatumbo lightning, procedural SFX, HP bars, turn timer.
@@ -302,7 +321,8 @@ Installed globally for opencode at `~/.config/opencode/skills/` (other tools may
 | `review-game` | Read-only architecture/perf audit |
 | `improve-game` | Find + implement highest-impact improvements |
 
-Additionally, 60 skills are installed **in this project** (`.agents/skills/`) from
+Additionally, 60 skills are installed **locally in this folder** (`.agents/skills/`,
+`.claude/skills/` — git-excluded, so a fresh clone won't have them) from
 `phaserjs/phaser`, `gamedev-skills/awesome-gamedev-agent-skills` and `heygen-com/hyperframes`.
 
 > ⚠️ **Version caveat (important):** all of those skill packages target **Phaser 4**, but this
@@ -319,12 +339,12 @@ Any tool that does not share these skills can still work from this document alon
 
 1. ~~Hackathon rules~~ — **RESOLVED** (§1): single `game.js`, Phaser via CDN, joystick cabinet.
 2. ~~JS vs TS~~ — **RESOLVED**: plain JS (no build step allowed).
-3. **Joystick ↔ iso mapping (P1)** — with an iso board, joystick up/down/left/right don't match
-   grid N/E/S/W on screen. Options: (a) top-down board + 2.5D units (also keeps the lake
-   readable), (b) iso board with an on-screen compass showing what each stick direction does.
+3. ~~Joystick ↔ iso mapping~~ — **RESOLVED**: iso board, 45° rotation + arrow glyphs (§1.1).
 4. **Simultaneous-resolution edge cases** — decided in `ROADMAP.md` §5 (same-cell, swap,
    non-walkable, dodge, back-hit, parry, clash). Implement exactly as written.
 5. ~~Two-player~~ — **OUT OF SCOPE**: shared screen leaks each player's plan. If ever revisited,
    the only viable approach is *blind chord input* (stick + button in one press, screen shows only
    `LOCKED ✓`); the controller architecture keeps that door open at no cost.
-6. **Fit 800×600** — 9×11 iso with 64×32 tiles ≈ 640×320 px: fits with room for HUD.
+6. **Fit 800×600** — 14×20 iso with 44×22 tiles ≈ 748×374 px + slab: fits with room for HUD.
+7. **ENERGY has no MVP spender** — parry grants energy but nothing in the MVP spends it until
+   `LUNGE` (stretch). Decide before P4 whether energy gets an MVP use or the pips wait for P7.

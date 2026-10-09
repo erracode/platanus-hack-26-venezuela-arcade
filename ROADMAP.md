@@ -106,7 +106,7 @@ A turn = **one Movement slot + one Combat slot**. Movement resolves before comba
 
 ---
 
-## 4. Meters & statuses (all tunable in `constants.js`)
+## 4. Meters & statuses (all tunable in the CONSTANTS section of `game.js`)
 
 | Meter | Range | Purpose |
 |-------|:-----:|---------|
@@ -166,8 +166,8 @@ Only after MVP is locked. Data-driven: `{ tile, trigger, chance, effect }`.
 | Zone | Idea | Tier |
 |------|------|------|
 | `4` Catatumbo | `P%` lightning strike → extra dmg / stun | STRETCH |
-| `5` Verdín (duckweed) | `P%` the move fails / you slip | STRETCH |
-| `6` Oil slick | refuel `+1 ENERGY` | STRETCH |
+| `6` Verdín (duckweed) | `P%` the move fails / you slip | STRETCH |
+| `7` Oil slick | refuel `+1 ENERGY` | STRETCH |
 
 All VFX procedural. No new art. Real-world basis: duckweed infestation + oil region (verified).
 
@@ -232,6 +232,6 @@ All VFX procedural. No new art. Real-world basis: duckweed infestation + oil reg
 1. ~~Hackathon rules~~ — **RESOLVED** (`SPEC.md` §1): single `game.js`, joystick cabinet, no mouse.
 2. ~~JS vs TS~~ — **RESOLVED**: plain JS.
 3. ~~1P vs 2P~~ — **RESOLVED**: `single_player` only; local 2P out of scope.
-4. **Projection + joystick mapping (P1)** — iso skews the lake and puts grid directions on screen
-   diagonals; decide top-down vs iso together with how the stick maps to N/E/S/W.
-5. **Grid size** — confirm 9×11 in P1 (fits 800×600).
+4. ~~Projection + joystick mapping~~ — **RESOLVED**: iso, 45° stick rotation + arrows (`SPEC.md` §1.1).
+5. ~~Grid size~~ — **RESOLVED**: 14×20 board (land slab + lake traced from the real outline), 44×22 tiles.
+6. **ENERGY MVP use (before P4)** — see `SPEC.md` §8.7.
