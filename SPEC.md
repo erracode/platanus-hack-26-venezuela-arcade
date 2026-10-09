@@ -71,7 +71,7 @@ grid **N = up-left** (strait/bridge at the back-left), **E = up-right** (palafit
 During the Movement step the 4 neighbour cells show ↑ → ↓ ← arrow glyphs so the player sees
 exactly where each stick direction goes.
 
-**Turn timing:** programming window `TURN_MS` (default 15 s, constant). On timeout, whatever is
+**Turn timing:** programming window `TURN_MS` (default 10 s — arcade pace; constant). On timeout, whatever is
 selected so far is locked; anything unselected defaults to *hold* / *none*. Clash window
 `CLASH_MS` (default 4 s); timeout → random pick. The CPU plans from the **state only** — it never
 reads the player's plan.
@@ -346,5 +346,5 @@ Any tool that does not share these skills can still work from this document alon
    the only viable approach is *blind chord input* (stick + button in one press, screen shows only
    `LOCKED ✓`); the controller architecture keeps that door open at no cost.
 6. **Fit 800×600** — 14×20 iso with 44×22 tiles ≈ 748×374 px + slab: fits with room for HUD.
-7. **ENERGY has no MVP spender** — parry grants energy but nothing in the MVP spends it until
-   `LUNGE` (stretch). Decide before P4 whether energy gets an MVP use or the pips wait for P7.
+7. ~~ENERGY has no MVP spender~~ — **DECIDED (pending user review)**: a full bar (3) makes the
+   next `SLASH` **charged** (×1.5) and empties the bar, hit or miss. HUD shows `CHARGED`.
