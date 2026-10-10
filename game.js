@@ -53,6 +53,10 @@ const GUTS_MAX = 3; // full guts unlock BURST in a clash
 const TURN_PENALTY = 40; // speed lost when a strike/parry/grab must turn first
 const CLASH_WINDOW = 40; // strikes at each other within this speed gap clash
 
+// Zone events (P8).
+const ZONE_CHANCE = { cat: 0.35, verdin: 0.4, oil: 1 }; // probability per turn
+const ZONE_VERDIN_DMG = 8; // slip damage
+
 // Stance ladder: NORMAL→STAGGERED→KNOCKBACK→DOWN
 const ST_NORMAL = 0;
 const ST_STAGGERED = 1;
@@ -74,7 +78,7 @@ const OVER_IDLE_MS = 20000;
 const P1_START = { x: 7, y: 15, facing: 'N' };
 const CPU_START = { x: 6, y: 8, facing: 'S' };
 
-// 0 water · 1 land · 2 bridge · 3 palafito · 4 Catatumbo · 5 scenery water (not walkable)
+// 0 water · 1 land · 2 bridge · 3 palafito · 4 Catatumbo · 5 scenery water (not walkable) · 6 verdín · 7 oil
 // 14 wide × 20 tall, north at the top (drawn top-left). Traced from the real lake outline with the
 // gulf + strait compressed into scenery; the field is the bridge and everything south of it.
 const LAGO_MAP = [
@@ -84,15 +88,15 @@ const LAGO_MAP = [
   [1, 1, 1, 1, 1, 5, 5, 5, 1, 1, 1, 1, 1, 1],
   [1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1],
   [1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1],
-  [1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1],
+  [1, 1, 1, 0, 6, 0, 0, 0, 0, 1, 1, 1, 1, 1],
+  [1, 1, 1, 0, 0, 0, 0, 0, 6, 1, 1, 1, 1, 1],
   [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1],
-  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1],
-  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1],
+  [1, 1, 0, 0, 0, 0, 7, 0, 0, 0, 0, 1, 1, 1],
+  [1, 1, 0, 0, 0, 7, 0, 0, 0, 0, 0, 1, 1, 1],
   [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
   [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 1, 1],
-  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
-  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 1, 1],
+  [1, 1, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 1, 1],
+  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 6, 3, 1, 1],
   [1, 1, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
   [1, 1, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
   [1, 1, 1, 1, 4, 0, 0, 0, 0, 0, 0, 1, 1, 1],
@@ -109,7 +113,7 @@ function tileAt(x, y) {
 
 function isWalkable(x, y) {
   const t = tileAt(x, y);
-  return t === 0 || t === 2 || t === 4;
+  return t === 0 || t === 2 || t === 4 || t === 6 || t === 7;
 }
 
 // Lake = anything that is not land (palafitos stand in the water, scenery water included).
@@ -332,6 +336,43 @@ function advanceStance(u) {
 // Beginning of a turn: DOWN → STAGGERED (wake up staggering). Staggered/Knockback remain.
 function resolveStanceRecovery(u) {
   if (u.st === ST_DOWN) u.st = ST_STAGGERED;
+}
+
+// Zone event tiles: 4=Catatumbo, 6=verdín, 7=oil.
+const ZONE_TILES = { '4': 'cat', '6': 'verdin', '7': 'oil' };
+const ZONE_TAG = { cat: 'CAT', verdin: 'VERDIN', oil: 'OIL' };
+const ZONE_COLOR = { cat: 0xffff00, verdin: 0x00ff88, oil: 0xff8800 };
+
+// Check a unit's tile, trigger the zone effect. Mutates the unit.
+function resolveZone(s, i, events, rnd = Math.random) {
+  const u = s.units[i];
+  const t = tileAt(u.x, u.y);
+  const key = '' + t;
+  const zone = ZONE_TILES[key];
+  if (!zone) return;
+  const tag = ZONE_TAG[zone];
+  const color = ZONE_COLOR[zone];
+  if (zone === 'cat' && rnd() < ZONE_CHANCE.cat) {
+    u.hp = Math.max(0, u.hp - Math.round(SLASH_DMG * 0.5));
+    advanceStance(u);
+    events.push({ t: 'zone', who: i, zone: tag, dmg: Math.round(SLASH_DMG * 0.5), st: u.st, color });
+    return;
+  }
+  if (zone === 'verdin' && rnd() < ZONE_CHANCE.verdin) {
+    u.hp = Math.max(0, u.hp - ZONE_VERDIN_DMG);
+    // Push back 1 tile if possible.
+    const back = step(u, OPPOSITE[u.facing]);
+    if (isWalkable(back.x, back.y) && !same(back, s.units[1 - i])) {
+      u.x = back.x;
+      u.y = back.y;
+    }
+    events.push({ t: 'zone', who: i, zone: tag, dmg: ZONE_VERDIN_DMG, push: true, color });
+    return;
+  }
+  if (zone === 'oil') {
+    gainGuts(u, 1);
+    events.push({ t: 'zone', who: i, zone: tag, dmg: 0, guts: true, color });
+  }
 }
 
 // V-SLASH: up to 3 tiles in a straight line in facing direction.
@@ -668,7 +709,8 @@ function cpuPlan(s, i, rnd = Math.random) {
   const score = (path) => {
     const t = path[path.length - 1];
     const contested = foeReach.has(t.x + ',' + t.y) ? 8 : 0;
-    return dist(t, foe) * 10 + (same(t, frontOf(foe)) ? 15 : 0) + contested + rnd() * 10;
+    const zoneBonus = tileAt(t.x, t.y) === 7 ? -10 : tileAt(t.x, t.y) === 4 ? 8 : tileAt(t.x, t.y) === 6 ? 6 : 0;
+    return dist(t, foe) * 10 + (same(t, frontOf(foe)) ? 15 : 0) + contested + zoneBonus + rnd() * 10;
   };
   paths.sort((a, b) => score(a) - score(b));
   return { act: 'move', path: paths[rnd() < 0.7 ? 0 : Math.min(paths.length - 1, 1 + Math.floor(rnd() * 2))] };
@@ -769,10 +811,11 @@ function drawTiles(g) {
         g.strokePoints(pts, true);
         continue;
       }
-      const color = t === 4 ? COLORS.bolt : COLORS.p1;
-      g.fillStyle(color, 0.05);
+      const tileColors = { 3: COLORS.p1, 4: COLORS.bolt, 6: 0x00ff88, 7: 0xff8800 };
+      const color = tileColors[t] || COLORS.p1;
+      g.fillStyle(color, t === 6 || t === 7 ? 0.12 : 0.05);
       g.fillPoints(pts, true);
-      g.lineStyle(1, color, 0.5);
+      g.lineStyle(1, color, t === 6 || t === 7 ? 0.7 : 0.5);
       g.strokePoints(pts, true);
     }
   }
@@ -1403,6 +1446,16 @@ async function lockTurn(s) {
     s.state = c.state;
   }
 
+  // Zone events: check each unit's tile after all actions resolve.
+  if (!s.state.over) {
+    const zEvents = [];
+    resolveZone(s.state, 0, zEvents);
+    resolveZone(s.state, 1, zEvents);
+    if (zEvents.length && !(await playEvents(s, zEvents, token))) return;
+    s.state = zEvents.reduce((st) => st, s.state);
+    s.dispHp = s.state.units.map((u) => u.hp);
+  }
+
   s.dispHp = s.state.units.map((u) => u.hp);
   s.view.forEach((v, i) => {
     const u = s.state.units[i];
@@ -1552,6 +1605,17 @@ async function playEvents(s, events, token) {
       addFx(s, { kind: 'flash', color: stColors[e.st] || COLORS.white, dur: 180 });
       if (stLabel) floatText(s, u, stLabel, stColors[e.st] || COLORS.white, 16);
       await wait(s, 250);
+    } else if (e.t === 'zone') {
+      const zLabel = e.zone + (e.dmg ? ' -' + e.dmg : '') + (e.guts ? ' +1 GUTS' : '') + (e.push ? ' SLIP!' : '') + (e.st ? ' ' + ['', 'STAGGERED', 'KNOCKBACK', 'DOWN'][e.st] : '');
+      floatText(s, u, zLabel, e.color || COLORS.bolt, 14);
+      if (e.dmg) {
+        u.flash = 0.6;
+        shake(100, 0.006);
+        s.sfx.hit();
+      }
+      if (e.guts) s.sfx.blip();
+      addFx(s, { kind: 'flash', color: e.color || COLORS.bolt, dur: 100 });
+      await wait(s, 400);
     } else if (e.t === 'clash' || e.t === 'mirror') {
       const m = toIso((v[0].gx + v[1].gx) / 2, (v[0].gy + v[1].gy) / 2);
       addFx(s, { kind: 'bolt', pts: makeBoltPoints(m.x, m.y - 24), dur: 550 });

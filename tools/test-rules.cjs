@@ -12,10 +12,10 @@ const ctx = {
 };
 vm.createContext(ctx);
 vm.runInContext(
-  src + '\n;globalThis.__api = { resolveTurn, resolveClash, resolveThrow, newState, cpuPlan, cpuClashPick, cpuThrowDir, isWalkable, reach };',
+  src + '\n;globalThis.__api = { resolveTurn, resolveClash, resolveThrow, resolveZone, newState, cpuPlan, cpuClashPick, cpuThrowDir, isWalkable, reach, tileAt, gainGuts, advanceStance, ZONE_TILES, ZONE_CHANCE, ZONE_VERDIN_DMG };',
   ctx,
 );
-const { resolveTurn, resolveClash, resolveThrow, newState, cpuPlan, cpuClashPick, cpuThrowDir, isWalkable, reach } = ctx.__api;
+const { resolveTurn, resolveClash, resolveThrow, resolveZone, newState, cpuPlan, cpuClashPick, cpuThrowDir, isWalkable, reach, tileAt, gainGuts, advanceStance, ZONE_TILES, ZONE_CHANCE, ZONE_VERDIN_DMG } = ctx.__api;
 
 const S = (a, b) => {
   const s = newState();
@@ -198,6 +198,44 @@ T('KO ends the match', () => {
     { act: 'wait' },
   ]);
   assert.strictEqual(r.state.over, 'p1');
+});
+
+// Zone event tests.
+T('oil zone gives +1 guts', () => {
+  const ev = [];
+  const s = S({ x: 4, y: 13, facing: 'N', guts: 0 }, { x: 6, y: 10, facing: 'W' });
+  // Tile (4,13) is oil=7.
+  assert.strictEqual(tileAt(4, 13), 7);
+  resolveZone(s, 0, ev, () => 1);
+  assert.strictEqual(s.units[0].guts, 1);
+  assert.ok(ev.some((e) => e.zone === 'OIL'));
+});
+T('catatumbo zone damages with 100% rng', () => {
+  const ev = [];
+  const s = S({ x: 3, y: 15, facing: 'N', hp: 100, st: 0 }, { x: 6, y: 10, facing: 'W' });
+  // Tile (3,15) is catatumbo=4.
+  assert.strictEqual(tileAt(3, 15), 4);
+  resolveZone(s, 0, ev, () => 0.01);
+  assert.ok(s.units[0].hp < 100);
+  assert.ok(s.units[0].st > 0);
+  assert.ok(ev.some((e) => e.zone === 'CAT'));
+});
+T('catatumbo does not trigger with bad rng', () => {
+  const ev = [];
+  const s = S({ x: 3, y: 15, facing: 'N', hp: 100 }, { x: 6, y: 10, facing: 'W' });
+  resolveZone(s, 0, ev, () => 0.99);
+  assert.strictEqual(s.units[0].hp, 100);
+  assert.strictEqual(ev.length, 0);
+});
+T('verdin zone pushes back on slip', () => {
+  const ev = [];
+  const s = S({ x: 4, y: 6, facing: 'W', hp: 100 }, { x: 6, y: 10, facing: 'W' });
+  // Tile (4,6) is verdin=6.
+  assert.strictEqual(tileAt(4, 6), 6);
+  const prevX = s.units[0].x;
+  resolveZone(s, 0, ev, () => 0.01);
+  assert.ok(s.units[0].hp <= 100 - ZONE_VERDIN_DMG, 'took verdin damage');
+  assert.ok(ev.some((e) => e.push));
 });
 
 // CPU vs CPU soak: every match must end; units never overlap or leave the water.
