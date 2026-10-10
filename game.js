@@ -53,6 +53,12 @@ const GUTS_MAX = 3; // full guts unlock BURST in a clash
 const TURN_PENALTY = 40; // speed lost when a strike/parry/grab must turn first
 const CLASH_WINDOW = 40; // strikes at each other within this speed gap clash
 
+// Stance ladder: NORMAL→STAGGERED→KNOCKBACK→DOWN
+const ST_NORMAL = 0;
+const ST_STAGGERED = 1;
+const ST_KNOCKBACK = 2;
+const ST_DOWN = 3;
+
 // Timing (ms).
 const TURN_MS = 15000;
 const CLASH_MS = 4000;
@@ -200,21 +206,24 @@ const ACTIONS = {
   move: { name: 'MOVE', spd: 100, target: 'tile', range: 2, info: ['WALK UP TO 2 TILES', '2 TILES = MOMENTUM (UNLOCKS LUNGE)'] },
   dodge: { name: 'DODGE', spd: 220, target: 'tile', range: 1, info: ['HOP 1 TILE, KEEP FACING', 'VERY FAST: ESCAPE AN ATTACK'] },
   pivot: { name: 'PIVOT', spd: 250, target: 'dir', info: ['TURN TO FACE ANOTHER SIDE', 'FASTEST ACTION'] },
-  slash: { name: 'SLASH', spd: 150, target: 'dir', strike: true, info: ['34 DMG TO THE TILE IN FRONT', 'X1.5 FROM BEHIND'] },
+  vslash: { name: 'V-SLASH', spd: 150, target: 'dir', strike: true, info: ['3 TILES FORWARD: 34 DMG', 'X2 ON FLANK'] },
+  hslash: { name: 'H-SLASH', spd: 130, target: 'dir', strike: true, info: ['WIDE SWEEP 3X2: 34 DMG', 'REACHES DIAGONALS'] },
   lunge: { name: 'LUNGE', spd: 200, target: 'dir', strike: true, info: ['DASH 2 TILES + STAB: 25 DMG', 'X2 ON FLANK  NEEDS MOMENTUM'] },
   parry: { name: 'PARRY', spd: 170, target: 'dir', info: ['BLOCKS STRIKES FROM THE FRONT', '+1 GUTS ON A BLOCK'] },
   grab: { name: 'GRAB', spd: 120, target: 'dir', info: ['CATCH + THROW: 25 DMG', 'IGNORES PARRY  SLOW'] },
+  burst: { name: 'BURST', spd: 300, target: 'none', info: ['ESCAPE KNOCKBACK: RESET STANCE', 'CONSUMES ALL GUTS'] },
   wait: { name: 'WAIT', spd: 0, target: 'none', info: [] },
 };
 const MOVE_ACTS = ['move', 'dodge', 'pivot'];
-const COMBAT_ACTS = ['slash', 'lunge', 'parry', 'grab'];
+const COMBAT_ACTS = ['vslash', 'hslash', 'lunge', 'parry', 'grab'];
+const STRIKE_ACTS = ['vslash', 'hslash', 'lunge'];
 const WAIT_PLAN = { act: 'wait' };
 // Clash picks: parry > thrust > feint > parry; burst beats thrust and feint, loses to parry.
 const CLASH_PICKS = ['thrust', 'parry', 'feint', 'burst'];
 const CLASH_WINS = { parry: ['thrust', 'burst'], thrust: ['feint'], feint: ['parry'], burst: ['thrust', 'feint'] };
 
 function newUnit(start) {
-  return { x: start.x, y: start.y, facing: start.facing, hp: HP_MAX, guts: 0, momentum: false, stunned: 0 };
+  return { x: start.x, y: start.y, facing: start.facing, hp: HP_MAX, guts: 0, momentum: false, st: ST_NORMAL };
 }
 
 function newState() {
@@ -252,7 +261,9 @@ function dirBetween(a, b) {
 }
 
 function canUse(u, act) {
-  return act !== 'lunge' || u.momentum;
+  if (act === 'lunge') return u.momentum;
+  if (act === 'burst') return u.st === ST_KNOCKBACK && u.guts >= GUTS_MAX;
+  return true;
 }
 
 // Turning before a strike/parry/grab costs speed.
@@ -262,25 +273,21 @@ function speedOf(u, plan) {
   return a.spd - (turns ? TURN_PENALTY : 0);
 }
 
-// Tiles unit i can reach in up to `range` steps (water only, never through the other unit).
+// Tiles unit i can reach in up to `range` steps in a straight line (cardinal only, no diagonals).
 // Returns Map "x,y" -> path (array of cells, start excluded).
 function reach(s, i, range) {
   const me = s.units[i];
   const foe = s.units[1 - i];
   const out = new Map();
-  const seen = new Set([me.x + ',' + me.y]);
-  const q = [{ x: me.x, y: me.y, path: [] }];
-  while (q.length) {
-    const c = q.shift();
-    if (c.path.length >= range) continue;
-    for (const k of DIR_KEYS) {
-      const n = step(c, k);
-      const key = n.x + ',' + n.y;
-      if (seen.has(key) || !isWalkable(n.x, n.y) || same(n, foe)) continue;
-      seen.add(key);
-      const path = [...c.path, n];
-      out.set(key, path);
-      q.push({ x: n.x, y: n.y, path });
+  for (const k of DIR_KEYS) {
+    const path = [];
+    let c = me;
+    for (let n = 0; n < range; n++) {
+      const t = step(c, k);
+      if (!isWalkable(t.x, t.y) || same(t, foe)) break;
+      path.push(t);
+      out.set(t.x + ',' + t.y, [...path]);
+      c = t;
     }
   }
   return out;
@@ -317,24 +324,72 @@ function previewPlan(u, plan, other) {
 
 const gainGuts = (u, n) => (u.guts = Math.min(GUTS_MAX, u.guts + n));
 
+// Advance stance when hit: N→S→K→D. Parry also sets the attacker to STAGGERED.
+function advanceStance(u) {
+  u.st = Math.min(ST_DOWN, u.st + 1);
+}
+
+// Beginning of a turn: DOWN → STAGGERED (wake up staggering). Staggered/Knockback remain.
+function resolveStanceRecovery(u) {
+  if (u.st === ST_DOWN) u.st = ST_STAGGERED;
+}
+
+// V-SLASH: up to 3 tiles in a straight line in facing direction.
+function vslashTiles(u) {
+  const out = [];
+  let c = u;
+  for (let n = 0; n < 3; n++) {
+    c = step(c, u.facing);
+    if (!isWalkable(c.x, c.y)) break;
+    out.push(c);
+  }
+  return out;
+}
+
+// H-SLASH: 3×2 block forward (3 wide, 2 deep).
+function hslashTiles(u) {
+  const d = DIRS[u.facing];
+  // Perpendicular axes: for N/S it's E/W. For E/W it's N/S.
+  const perp = u.facing === 'N' || u.facing === 'S' ? ['E', 'W'] : ['N', 'S'];
+  const p = perp.map(k => DIRS[k]);
+  const out = [];
+  for (let depth = 1; depth <= 2; depth++) {
+    const row = { x: u.x + d.dx * depth, y: u.y + d.dy * depth };
+    out.push(row);
+    out.push({ x: row.x + p[0].dx, y: row.y + p[0].dy });
+    out.push({ x: row.x + p[1].dx, y: row.y + p[1].dy });
+  }
+  return out;
+}
+
+// Check if a position is in a list of tiles (within bounds).
+function inTiles(pos, tiles) {
+  return tiles.some(t => t.x === pos.x && t.y === pos.y);
+}
+
 function resolveTurn(state, plans) {
   const s = cloneState(state);
   const U = s.units;
   const events = [];
-  const p = plans.map((plan, i) => (U[i].stunned || !canUse(U[i], plan.act) ? WAIT_PLAN : plan));
+  const p = plans.map((plan, i) => (U[i].st !== ST_NORMAL || !canUse(U[i], plan.act) ? WAIT_PLAN : plan));
   const spd = p.map((plan, i) => (plan.act === 'wait' ? 0 : speedOf(U[i], plan)));
   const momentum = U.map((u, i) => p[i].act === 'move' && (p[i].path || []).length === 2);
   U.forEach((u, i) => p[i].act === 'lunge' && (u.momentum = false));
   events.push({ t: 'order', acts: p.map((x) => x.act), spd });
 
   // Clash: both strike at each other (after their dashes) with speeds within the clash window.
-  if (ACTIONS[p[0].act].strike && ACTIONS[p[1].act].strike && Math.abs(spd[0] - spd[1]) <= CLASH_WINDOW) {
+  if (STRIKE_ACTS.includes(p[0].act) && STRIKE_ACTS.includes(p[1].act) && Math.abs(spd[0] - spd[1]) <= CLASH_WINDOW) {
     const end = U.map((u, i) => {
       const path = p[i].act === 'lunge' ? dashPath(u, p[i].dir, LUNGE_DASH, U[1 - i]) : [];
       return { path, at: path.length ? path[path.length - 1] : u, facing: p[i].dir };
     });
-    const hits = (i) => same(step(end[i].at, end[i].facing), end[1 - i].at);
-    if (!same(end[0].at, end[1].at) && hits(0) && hits(1)) {
+    const hitTiles = (i) => {
+      const src = end[i];
+      if (p[i].act === 'vslash') return vslashTiles({ x: src.at.x, y: src.at.y, facing: src.facing });
+      if (p[i].act === 'hslash') return hslashTiles({ x: src.at.x, y: src.at.y, facing: src.facing });
+      return [step(src.at, src.facing)];
+    };
+    if (!same(end[0].at, end[1].at) && inTiles(end[1].at, hitTiles(0)) && inTiles(end[0].at, hitTiles(1))) {
       U.forEach((u, i) => {
         u.facing = end[i].facing;
         if (end[i].path.length) {
@@ -363,6 +418,9 @@ function resolveTurn(state, plans) {
     const total = Math.round(dmg * (flank ? flankMult : 1));
     foe.hp = Math.max(0, foe.hp - total);
     gainGuts(U[i], 1);
+    const prevSt = foe.st;
+    advanceStance(foe);
+    if (prevSt !== foe.st) events.push({ t: 'stance', who: 1 - i, st: foe.st });
     events.push({ t: 'hit', who: 1 - i, dmg: total, flank: flank && flankMult > 1 });
     if (!done[1 - i] && !groups.find((g) => g.includes(i)).includes(1 - i) && p[1 - i].act !== 'wait' && !cancelled[1 - i]) {
       cancelled[1 - i] = true;
@@ -420,25 +478,33 @@ function resolveTurn(state, plans) {
         guard[i] = true;
         events.push({ t: 'guard', who: i });
       }
+      if (p[i].act === 'burst') {
+        U[i].guts = 0;
+        U[i].st = ST_NORMAL;
+        events.push({ t: 'burst', who: i });
+      }
     }
 
-    // Strikes: parry blocks from the front; slash x1.5 from behind, lunge x2 on any flank.
+    // Strikes: hitbox depends on the attack type. V-SLASH = 3 forward, H-SLASH = 3×2 block.
     for (const i of acting) {
       if (!ACTIONS[p[i].act].strike) continue;
       const u = U[i];
       const foe = U[1 - i];
-      const f = frontOf(u);
-      events.push({ t: p[i].act, who: i, x: f.x, y: f.y });
-      if (!same(f, foe)) {
+      const tiles = p[i].act === 'vslash' ? vslashTiles(u) : p[i].act === 'hslash' ? hslashTiles(u) : [frontOf(u)];
+      const f = tiles[0] || frontOf(u);
+      events.push({ t: p[i].act, who: i, x: f.x, y: f.y, tiles });
+      if (!inTiles(foe, tiles)) {
         events.push({ t: 'miss', who: i });
         continue;
       }
       if (guard[1 - i] && same(frontOf(foe), u)) {
         gainGuts(foe, 1);
+        advanceStance(u); // parried → staggered
+        events.push({ t: 'stance', who: i, st: u.st });
         events.push({ t: 'parry', who: 1 - i });
         continue;
       }
-      if (p[i].act === 'slash') strike(i, SLASH_DMG * (same(backOf(foe), u) ? BACK_MULT : 1), false, 1);
+      if (p[i].act === 'vslash' || p[i].act === 'hslash') strike(i, SLASH_DMG, false, 2);
       else strike(i, LUNGE_DMG, false, LUNGE_FLANK);
     }
 
@@ -462,7 +528,7 @@ function resolveTurn(state, plans) {
   }
 
   U.forEach((u, i) => {
-    u.stunned = 0;
+    resolveStanceRecovery(u);
     if (p[i].act !== 'lunge') u.momentum = momentum[i];
     if (momentum[i]) events.push({ t: 'momentum', who: i });
   });
@@ -510,7 +576,9 @@ function resolveClash(state, picks) {
     const w = s.units[winner];
     const loser = s.units[1 - winner];
     loser.hp = Math.max(0, loser.hp - SLASH_DMG);
-    loser.stunned = 1;
+    const prevSt = loser.st;
+    advanceStance(loser);
+    if (prevSt !== loser.st) events.push({ t: 'stance', who: 1 - winner, st: loser.st });
     gainGuts(w, 1);
     events.push({ t: 'clashWin', who: winner, picks });
     events.push({ t: 'hit', who: 1 - winner, dmg: SLASH_DMG });
@@ -541,15 +609,30 @@ function finishTurn(s) {
 function cpuPlan(s, i, rnd = Math.random) {
   const me = s.units[i];
   const foe = s.units[1 - i];
-  if (me.stunned) return WAIT_PLAN;
+  // BURST escape when knocked back with a full bar.
+  if (me.st === ST_KNOCKBACK && me.guts >= GUTS_MAX && rnd() < 0.8) return { act: 'burst' };
+  if (me.st !== ST_NORMAL) return WAIT_PLAN;
   const r = rnd();
   const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
+
+  // Chain the combo: if the foe is staggered/knocked/down and in vslash range, press it.
+  if (foe.st !== ST_NORMAL) {
+    const lane = DIR_KEYS.find((k) => {
+      const hit = step(me, k);
+      return inTiles(foe, [hit, step(hit, k), step(step(hit, k), k)]);
+    });
+    if (lane && rnd() < 0.85) return { act: 'vslash', dir: lane };
+    if (dist(me, foe) <= 2 && rnd() < 0.7) {
+      const toFoe = dirBetween(me, foe);
+      if (toFoe) return { act: 'hslash', dir: toFoe };
+    }
+  }
 
   if (dist(me, foe) === 1) {
     const toFoe = dirBetween(me, foe);
     const threatened = same(frontOf(foe), me);
-    if (!threatened) return { act: r < 0.65 ? 'slash' : r < 0.85 ? 'grab' : 'parry', dir: toFoe };
-    if (r < 0.3) return { act: 'slash', dir: toFoe };
+    if (!threatened) return { act: r < 0.65 ? 'vslash' : r < 0.85 ? 'grab' : 'parry', dir: toFoe };
+    if (r < 0.3) return { act: 'vslash', dir: toFoe };
     if (r < 0.55) return { act: 'parry', dir: toFoe };
     if (r < 0.75) return { act: 'grab', dir: toFoe };
     const outs = [...reach(s, i, 1).values()].filter((path) => !same(path[0], frontOf(foe)));
@@ -568,13 +651,13 @@ function cpuPlan(s, i, rnd = Math.random) {
   }
 
   // Two apart in a line: zone the middle tile or guard it.
-  if (line && r < 0.4) return { act: 'slash', dir: line };
+  if (line && r < 0.4) return { act: 'vslash', dir: line };
   if (line && r < 0.55) return { act: 'parry', dir: line };
 
   // Diagonal neighbours: wait on one of the two tiles the foe can step into.
   if (Math.abs(me.x - foe.x) === 1 && Math.abs(me.y - foe.y) === 1 && r < 0.6) {
     const k = pick(DIR_KEYS.filter((d) => dist(step(me, d), foe) === 1));
-    return { act: r < 0.4 ? 'slash' : 'parry', dir: k };
+    return { act: r < 0.4 ? 'vslash' : 'parry', dir: k };
   }
 
   // Approach: closest reachable tile, avoiding the foe's front tile and tiles the foe can also
@@ -827,8 +910,9 @@ function drawCell(g, x, y, color, fillAlpha, lineAlpha) {
   g.strokePoints(pts, true);
 }
 
-// Wireframe mecha standing on a (possibly fractional) grid position.
-function drawMecha(g, gx, gy, facing, color, alpha, flash) {
+// Wireframe mecha standing on a (possibly fractional) grid position. `stance` (0-3) changes the
+// posture: 0 normal, 1 staggered (lean back), 2 knockback (tilt forward), 3 down (kneeling small).
+function drawMecha(g, gx, gy, facing, color, alpha, flash, stance) {
   const c = toIso(gx, gy);
   const v = dirVec(facing);
   const n = Math.hypot(v.x, v.y);
@@ -836,33 +920,47 @@ function drawMecha(g, gx, gy, facing, color, alpha, flash) {
   const fy = v.y / n;
   const col = flash > 0 ? COLORS.white : color;
 
+  // Posture transforms.
+  const s = stance || ST_NORMAL;
+  let squeeze = 1; // vertical squash (1 = full height)
+  let yOff = 0; // additional sink
+  let tx = 0; // lean along facing (positive = toward facing)
+  if (s === ST_STAGGERED) tx = -6;
+  else if (s === ST_KNOCKBACK) tx = 5;
+  else if (s === ST_DOWN) {
+    squeeze = 0.62;
+    yOff = 8;
+  }
+
   // Facing chevron on the tile, pointing at the front edge.
   const tip = { x: c.x + v.x * 0.48, y: c.y + v.y * 0.48 };
   const base = { x: c.x + v.x * 0.22, y: c.y + v.y * 0.22 };
   g.fillStyle(col, 0.9 * alpha);
   g.fillTriangle(tip.x, tip.y, base.x - fy * 7, base.y + fx * 7, base.x + fy * 7, base.y - fx * 7);
 
-  const x = c.x;
-  const y = c.y;
+  const x = c.x + tx;
+  const y = c.y + yOff;
+  // Torso: pull the top toward the ground when down (squash) to show kneeling.
+  const topY = y - 28 * squeeze;
   const torso = [
-    { x: x - 8, y: y - 13 },
-    { x: x + 8, y: y - 13 },
-    { x: x + 11, y: y - 28 },
-    { x: x - 11, y: y - 28 },
+    { x: x - 8, y: y - 13 * squeeze },
+    { x: x + 8, y: y - 13 * squeeze },
+    { x: x + 11, y: topY },
+    { x: x - 11, y: topY },
   ];
   g.fillStyle(col, 0.15 * alpha);
   g.fillPoints(torso, true);
   g.lineStyle(1.5, col, alpha);
   g.strokePoints(torso, true);
-  g.lineBetween(x - 6, y - 1, x - 4, y - 13);
-  g.lineBetween(x + 6, y - 1, x + 4, y - 13);
-  g.strokeRect(x - 17, y - 30, 6, 8);
-  g.strokeRect(x + 11, y - 30, 6, 8);
-  g.strokePoints(rhombus(x, y - 34, 5, 5), true);
+  g.lineBetween(x - 6, y - 1, x - 4, y - 13 * squeeze);
+  g.lineBetween(x + 6, y - 1, x + 4, y - 13 * squeeze);
+  g.strokeRect(x - 17, y - 30 * squeeze, 6, 8 * squeeze);
+  g.strokeRect(x + 11, y - 30 * squeeze, 6, 8 * squeeze);
+  g.strokePoints(rhombus(x, y - 34 * squeeze, 5, 5), true);
   // Visor + blade point the way the mecha faces.
   g.lineStyle(2, col, alpha);
-  g.lineBetween(x, y - 34, x + fx * 6, y - 34 + fy * 4);
-  g.lineBetween(x + fx * 9, y - 20, x + fx * 26, y - 20 + fy * 13);
+  g.lineBetween(x, y - 34 * squeeze, x + fx * 6, y - 34 * squeeze + fy * 4);
+  g.lineBetween(x + fx * 9, y - 20 * squeeze, x + fx * 26, y - 20 * squeeze + fy * 13);
 }
 
 // Persona-style slanted label slab.
@@ -1036,11 +1134,18 @@ new Phaser.Game(config);
 const hex = (n) => '#' + n.toString(16).padStart(6, '0');
 const MENU = [MOVE_ACTS, COMBAT_ACTS];
 const MENU_TITLES = ['MOVEMENT', 'COMBAT'];
+
+// Dynamic menu: adds a BURST row to COMBAT when the unit is KNOCKBACK with full guts.
+function buildMenu(u) {
+  const combat = [...COMBAT_ACTS];
+  if (u.st === ST_KNOCKBACK && u.guts >= GUTS_MAX) combat.push('burst');
+  return [MOVE_ACTS, combat];
+}
 const CARDS = [
   ['CATATUMBO PROTOCOL', 'MECHA DUEL ON LAKE MARACAIBO'],
   ['HOW TO PLAY  1/3', 'BOTH MECHS SECRETLY PICK\nONE ACTION AT THE SAME TIME'],
   ['HOW TO PLAY  2/3', 'FASTER ACTIONS LAND FIRST\nGET HIT BEFORE YOU ACT = ACTION LOST\nTURNING TO STRIKE COSTS 40 SPEED'],
-  ['HOW TO PLAY  3/3', 'STRIKE EACH OTHER = SWORD CLASH\nSLASH > GRAB > PARRY > SLASH\nMOVE 2 TILES = MOMENTUM: LUNGE'],
+  ['HOW TO PLAY  3/3', 'STRIKE EACH OTHER = SWORD CLASH\nPARRY > THRUST > FEINT > PARRY\nPARRY OPENS COMBO: STAGGER→KNOCK→DOWN'],
 ];
 
 function txt(scene, x, y, size, color, originX = 0) {
@@ -1103,7 +1208,7 @@ function resetMatch(s, mode) {
   s.token++;
   s.mode = mode;
   s.state = newState();
-  s.view = s.state.units.map((u) => ({ gx: u.x, gy: u.y, facing: u.facing, flash: 0 }));
+  s.view = s.state.units.map((u) => ({ gx: u.x, gy: u.y, facing: u.facing, st: 0, flash: 0 }));
   s.dispHp = [HP_MAX, HP_MAX];
   s.fx = [];
   s.lastP1Pick = null;
@@ -1132,7 +1237,7 @@ function beginTurn(s) {
   s.p1Plan = play ? null : cpuPlan(s.state, 0);
   s.phase = s.p1Plan ? 'locked' : 'choose';
   s.deadline = now + TURN_MS;
-  s.sel = { act: MENU[s.menuPos.col][s.menuPos.row], dir: s.state.units[0].facing, cur: null };
+  s.sel = { act: buildMenu(s.state.units[0])[s.menuPos.col][s.menuPos.row], dir: s.state.units[0].facing, cur: null };
 }
 
 function lockP1(s, plan) {
@@ -1145,7 +1250,15 @@ function lockP1(s, plan) {
 function startAim(s) {
   const me = s.state.units[0];
   const a = ACTIONS[s.sel.act];
-  if (!canUse(me, s.sel.act)) return s.sfx.tick();
+  if (!a || !canUse(me, s.sel.act)) return s.sfx.tick();
+  // BURST / WAIT have no aim step — lock immediately.
+  if (a.target === 'none') {
+    if (s.sel.act === 'burst') {
+      lockP1(s, { act: 'burst' });
+      return;
+    }
+    return s.sfx.tick();
+  }
   s.sel.dir = me.facing;
   s.sel.cur = null;
   if (a.target === 'tile') {
@@ -1217,7 +1330,7 @@ function handleInput(s, time) {
   }
   if (s.phase !== 'choose' && s.phase !== 'aim') return;
 
-  if (s.state.units[0].stunned) {
+  if (s.state.units[0].st !== ST_NORMAL) {
     if (time > s.phaseStart + STUN_SHOW_MS) lockP1(s, WAIT_PLAN);
     return;
   }
@@ -1225,16 +1338,18 @@ function handleInput(s, time) {
 
   const sel = s.sel;
   if (s.phase === 'choose') {
+    const me = s.state.units[0];
     const m = s.menuPos;
-    const col = MENU[m.col];
+    const fullMenu = buildMenu(me);
+    const col = fullMenu[m.col];
     if (consumePressed(c, 'P1_U')) m.row = (m.row + col.length - 1) % col.length;
     else if (consumePressed(c, 'P1_D')) m.row = (m.row + 1) % col.length;
     else if (consumePressed(c, 'P1_L') || consumePressed(c, 'P1_R')) {
       m.col = 1 - m.col;
-      m.row = Math.min(m.row, MENU[m.col].length - 1);
+      m.row = Math.min(m.row, fullMenu[m.col].length - 1);
     } else if (consumePressed(c, 'P1_1')) return startAim(s);
     else return;
-    sel.act = MENU[m.col][m.row];
+    sel.act = fullMenu[m.col][m.row];
     s.sfx.tick();
     return;
   }
@@ -1291,7 +1406,7 @@ async function lockTurn(s) {
   s.dispHp = s.state.units.map((u) => u.hp);
   s.view.forEach((v, i) => {
     const u = s.state.units[i];
-    Object.assign(v, { gx: u.x, gy: u.y, facing: u.facing });
+    Object.assign(v, { gx: u.x, gy: u.y, facing: u.facing, st: u.st });
   });
   await wait(s, 450);
   if (token === s.token) beginTurn(s);
@@ -1386,8 +1501,10 @@ async function playEvents(s, events, token) {
       addFx(s, { kind: 'guard', who: e.who, dur: 4000 });
       s.sfx.blip();
       await wait(s, 250);
-    } else if (e.t === 'slash' || e.t === 'lunge' || e.t === 'grab') {
-      addFx(s, { kind: 'cell', x: e.x, y: e.y, color: unitColor(e.who), dur: 450 });
+    } else if (e.t === 'vslash' || e.t === 'hslash' || e.t === 'lunge' || e.t === 'grab') {
+      (e.tiles && e.tiles.length ? e.tiles : [{ x: e.x, y: e.y }]).forEach((t) =>
+        addFx(s, { kind: 'cell', x: t.x, y: t.y, color: unitColor(e.who), dur: 450 }),
+      );
       if (e.t !== 'grab') addFx(s, { kind: 'sweep', who: e.who, dur: 350 });
       s.sfx.swing();
       await wait(s, 260);
@@ -1397,7 +1514,11 @@ async function playEvents(s, events, token) {
     } else if (e.t === 'hit') {
       u.flash = 1;
       s.dispHp[e.who] = Math.max(0, s.dispHp[e.who] - e.dmg);
-      floatText(s, u, '-' + e.dmg + (e.flank ? ' FLANK!' : '') + (e.slam ? ' SLAM!' : ''), COLORS.white, 17);
+      const dmgText = '-' + e.dmg + (e.flank ? ' FLANK!' : '') + (e.slam ? ' SLAM!' : '');
+      floatText(s, u, dmgText, COLORS.white, 17);
+      // Combo bonus: if the target was in a non-normal stance, shout it.
+      const targetSt = s.state && s.state.units[e.who] ? s.state.units[e.who].st : 0;
+      if (targetSt > ST_NORMAL) floatText(s, u, 'COMBO!', COLORS.bolt, 14);
       shake(140, 0.008);
       s.sfx.hit();
       await wait(s, HIT_PAUSE_MS);
@@ -1420,6 +1541,17 @@ async function playEvents(s, events, token) {
       await wait(s, 200);
     } else if (e.t === 'momentum') {
       floatText(s, u, 'MOMENTUM', COLORS.bolt, 13);
+    } else if (e.t === 'burst') {
+      floatText(s, u, 'BURST!', COLORS.bolt, 17);
+      addFx(s, { kind: 'flash', dur: 120 });
+      s.sfx.clash();
+      await wait(s, 300);
+    } else if (e.t === 'stance') {
+      const stColors = [0, COLORS.bolt, COLORS.cpu, COLORS.white];
+      const stLabel = ['', 'STAGGERED', 'KNOCKBACK', 'DOWN'][e.st];
+      addFx(s, { kind: 'flash', color: stColors[e.st] || COLORS.white, dur: 180 });
+      if (stLabel) floatText(s, u, stLabel, stColors[e.st] || COLORS.white, 16);
+      await wait(s, 250);
     } else if (e.t === 'clash' || e.t === 'mirror') {
       const m = toIso((v[0].gx + v[1].gx) / 2, (v[0].gy + v[1].gy) / 2);
       addFx(s, { kind: 'bolt', pts: makeBoltPoints(m.x, m.y - 24), dur: 550 });
@@ -1455,7 +1587,7 @@ function drawWorld(s, time, delta) {
   const me = s.state.units[0];
   const play = s.mode === 'play';
   const blink = 0.5 + 0.5 * Math.sin(time / 90);
-  if (play && (s.phase === 'choose' || s.phase === 'aim') && !me.stunned) {
+  if (play && (s.phase === 'choose' || s.phase === 'aim') && me.st === ST_NORMAL) {
     const sel = s.sel;
     const a = ACTIONS[sel.act];
     if (s.phase === 'aim' && a.target === 'tile') {
@@ -1482,9 +1614,14 @@ function drawWorld(s, time, delta) {
       }
       if (sel.act !== 'pivot') {
         const end = previewPlan(me, { act: sel.act, dir: sel.dir }, s.state.units[1]);
-        const f = step(end, sel.dir);
         const col = sel.act === 'parry' ? COLORS.white : COLORS.cpu;
-        drawCell(g, f.x, f.y, col, 0.15 + 0.2 * blink, 0.5 + 0.5 * blink);
+        const atkTiles =
+          sel.act === 'vslash'
+            ? vslashTiles({ x: end.x, y: end.y, facing: sel.dir })
+            : sel.act === 'hslash'
+            ? hslashTiles({ x: end.x, y: end.y, facing: sel.dir })
+            : [step(end, sel.dir)];
+        atkTiles.forEach((c) => drawCell(g, c.x, c.y, col, 0.15 + 0.2 * blink, 0.5 + 0.5 * blink));
       }
     }
     if (s.phase === 'aim') {
@@ -1509,12 +1646,13 @@ function drawWorld(s, time, delta) {
   const order = s.view.map((v, i) => ({ v, i })).sort((a, b) => a.v.gy - a.v.gx - (b.v.gy - b.v.gx));
   for (const { v, i } of order) {
     v.flash = Math.max(0, v.flash - delta / 250);
-    if (i === 0 && ghost) drawMecha(gu, ghost.x, ghost.y, ghost.facing, COLORS.p1, 0.35, 0);
-    drawMecha(gu, v.gx, v.gy, v.facing, unitColor(i), 1, v.flash);
+    if (i === 0 && ghost) drawMecha(gu, ghost.x, ghost.y, ghost.facing, COLORS.p1, 0.35, 0, 0);
+    drawMecha(gu, v.gx, v.gy, v.facing, unitColor(i), 1, v.flash, v.st);
     const p = toIso(v.gx, v.gy);
     drawMiniBar(gu, p.x, p.y + 12, s.dispHp[i] / HP_MAX, unitColor(i));
     s.ui.tags[i].setPosition(p.x, p.y + 25);
-    setT(s.ui.tags[i], i ? 'CPU' : 'P1');
+    const stName = ['P1', 'CPU'][i] + (v.st ? '  ' + ['', 'STAGGERED', 'KNOCKBACK', 'DOWN'][v.st] : '');
+    setT(s.ui.tags[i], stName);
     const ready = i === 0 ? !!s.p1Plan && s.phase === 'locked' : s.phase === 'locked' || (play && (s.phase === 'choose' || s.phase === 'aim') && time > s.cpuReadyAt);
     if (ready) drawCheck(gu, p.x + 16, p.y - 50, unitColor(i));
   }
@@ -1529,7 +1667,7 @@ function drawWorld(s, time, delta) {
     else if (f.kind === 'sweep') drawSweep(gt, s.view[f.who].gx, s.view[f.who].gy, s.view[f.who].facing, unitColor(f.who), a);
     else if (f.kind === 'guard') drawGuard(gt, s.view[f.who].gx, s.view[f.who].gy, s.view[f.who].facing, a);
     else if (f.kind === 'flash') {
-      gt.fillStyle(COLORS.white, 0.35 * a);
+      gt.fillStyle(f.color || COLORS.white, 0.35 * a);
       gt.fillRect(0, 0, W, H);
     }
   }
@@ -1562,8 +1700,9 @@ function drawHud(s, time) {
       g.fillPoints(rhombus(px, 58, 6, 6), true);
     }
     setT(ui.names[i], (i ? 'CPU' : 'P1') + '  HP ' + Math.max(0, s.dispHp[i]));
-    const tags = [u.stunned && 'STUNNED', u.momentum && 'MOMENTUM', u.guts >= GUTS_MAX && 'BURST READY'];
-    setT(ui.status[i], 'GUTS  ' + tags.filter(Boolean).join('  '));
+    const stLabel = ['', 'STAGGERED', 'KNOCKBACK', 'DOWN'][u.st] || '';
+    const tags = [stLabel, u.momentum && 'MOMENTUM', u.guts >= GUTS_MAX && 'BURST READY'];
+    setT(ui.status[i], (stLabel ? 'GUTS  ' : '') + tags.filter(Boolean).join('  '));
   });
 
   // Info panel (top centre): what the highlighted action does.
@@ -1588,9 +1727,10 @@ function drawHud(s, time) {
   } else if (play && aiming) {
     phase = 'AIM ' + ACTIONS[s.sel.act].name;
     hint = 'STICK AIM   B1 CONFIRM   B2 BACK';
-  } else if (play && s.phase === 'choose') {
-    phase = 'STUNNED';
-    hint = 'YOU LOST THE CLASH: NO ACTION THIS TURN';
+  } else if (play && s.phase === 'choose' && units[0].st !== ST_NORMAL) {
+    const stName = ['', 'STAGGERED', 'KNOCKBACK', 'DOWN'][units[0].st];
+    phase = stName;
+    hint = 'CANNOT ACT THIS TURN';
   } else if (play && s.phase === 'locked') {
     phase = 'LOCKED IN';
     hint = time > s.cpuReadyAt ? 'BOTH READY' : 'WAITING FOR CPU...';
@@ -1610,7 +1750,8 @@ function drawHud(s, time) {
   const items = [];
   if (play && aiming && s.phase === 'choose') {
     const p = toIso(s.view[0].gx, s.view[0].gy);
-    MENU.forEach((col, ci) => {
+    const fullMenu = buildMenu(units[0]);
+    fullMenu.forEach((col, ci) => {
       const x = Math.max(70, Math.min(W - 70, p.x + (ci ? 90 : -90)));
       items.push({ x, y: p.y - 112, label: MENU_TITLES[ci], header: true });
       col.forEach((act, ri) => {
@@ -1636,8 +1777,16 @@ function drawHud(s, time) {
   if (play && (s.phase === 'choose' || s.phase === 'aim' || s.phase === 'clash' || s.phase === 'throw')) {
     const total = s.phase === 'clash' || s.phase === 'throw' ? CLASH_MS : TURN_MS;
     const left = Math.max(0, s.deadline - time) / total;
-    g.fillStyle(left < 0.25 ? COLORS.cpu : COLORS.p1, 0.9);
-    g.fillRect(W / 2 - 150, H - 16, 300 * left, 4);
+    const barW = 300;
+    const barX = W / 2 - barW / 2;
+    const barY = H - 16;
+    // Border.
+    g.lineStyle(1.5, COLORS.white, 0.6);
+    g.strokeRect(barX - 1, barY - 1, barW + 2, 6);
+    // Fill: green→yellow→red as time runs out.
+    const barColor = left > 0.5 ? COLORS.p1 : left > 0.25 ? COLORS.bolt : COLORS.cpu;
+    g.fillStyle(barColor, 0.9);
+    g.fillRect(barX, barY, barW * left, 4);
   }
 
   // Overlays: attract title + how-to-play cards, or game over.

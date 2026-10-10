@@ -36,20 +36,20 @@ const has = (r, t) => r.events.some((e) => e.t === t);
 const C = (x, y) => ({ x, y });
 // Cells used below: row 10 spans x 2..10, all water.
 
-T('front slash hits for 34', () => {
-  const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'N' }), [
-    { act: 'slash', dir: 'E' },
-    { act: 'pivot', dir: 'N' },
+T('front vslash hits for 34 (facing each other, no flank)', () => {
+  const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'W' }), [
+    { act: 'vslash', dir: 'E' },
+    { act: 'pivot', dir: 'W' },
   ]);
   assert.strictEqual(r.state.units[1].hp, 66);
 });
-T('back slash x1.5', () => {
-  const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'E' }), [{ act: 'slash', dir: 'E' }, { act: 'wait' }]);
-  assert.strictEqual(r.state.units[1].hp, 49);
+T('vsash from behind = flank x2 (68)', () => {
+  const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'E' }), [{ act: 'vslash', dir: 'E' }, { act: 'wait' }]);
+  assert.strictEqual(r.state.units[1].hp, 32);
 });
-T('DODGE (220) escapes a SLASH (150) and keeps facing', () => {
+T('DODGE (220) escapes a V-SLASH (150) and keeps facing', () => {
   const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'W' }), [
-    { act: 'slash', dir: 'E' },
+    { act: 'vslash', dir: 'E' },
     { act: 'dodge', path: [C(6, 9)] },
   ]);
   assert.strictEqual(r.state.units[1].hp, 100);
@@ -58,41 +58,41 @@ T('DODGE (220) escapes a SLASH (150) and keeps facing', () => {
 });
 T('MOVE (100) is too slow: hit first and interrupted', () => {
   const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'W' }), [
-    { act: 'slash', dir: 'E' },
+    { act: 'vslash', dir: 'E' },
     { act: 'move', path: [C(7, 10), C(8, 10)] },
   ]);
   assert.strictEqual(r.state.units[1].hp, 66);
   assert.deepStrictEqual([r.state.units[1].x, r.state.units[1].y], [6, 10]);
   assert.ok(has(r, 'interrupt'));
 });
-T('PARRY already facing (170) blocks SLASH (150) from the front', () => {
+T('PARRY already facing (170) blocks V-SLASH (150) from the front', () => {
   const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'W' }), [
-    { act: 'slash', dir: 'E' },
+    { act: 'vslash', dir: 'E' },
     { act: 'parry', dir: 'W' },
   ]);
   assert.strictEqual(r.state.units[1].hp, 100);
   assert.strictEqual(r.state.units[1].guts, 1);
 });
-T('PARRY that must turn (130) is too slow vs SLASH (150)', () => {
+T('PARRY that must turn (130) is too slow vs V-SLASH (150): takes flank x2 (68)', () => {
   const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'N' }), [
-    { act: 'slash', dir: 'E' },
+    { act: 'vslash', dir: 'E' },
     { act: 'parry', dir: 'W' },
   ]);
-  assert.strictEqual(r.state.units[1].hp, 66);
+  assert.strictEqual(r.state.units[1].hp, 32, 'flanking vslash from E vs turning to W = ×2');
   assert.ok(has(r, 'interrupt'));
 });
-T('face-to-face SLASH at equal speed → clash', () => {
+T('face-to-face V-SLASH at equal speed → clash', () => {
   const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'W' }), [
-    { act: 'slash', dir: 'E' },
-    { act: 'slash', dir: 'W' },
+    { act: 'vslash', dir: 'E' },
+    { act: 'vslash', dir: 'W' },
   ]);
   assert.ok(r.clash);
   assert.strictEqual(r.state.units[0].hp + r.state.units[1].hp, 200);
 });
-T('turning SLASH (110) vs ready SLASH (150) still clashes (within window 40)', () => {
+T('turning V-SLASH (110) vs ready V-SLASH (150) still clashes (within window 40)', () => {
   const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'N' }), [
-    { act: 'slash', dir: 'E' },
-    { act: 'slash', dir: 'W' },
+    { act: 'vslash', dir: 'E' },
+    { act: 'vslash', dir: 'W' },
   ]);
   assert.ok(r.clash);
 });
@@ -129,9 +129,9 @@ T('BURST beats THRUST and FEINT, loses to PARRY, spends guts', () => {
   c = resolveClash(s, ['burst', 'parry']);
   assert.strictEqual(c.state.units[0].hp, 66);
 });
-T('zoning: a faster DODGE into the slashed tile gets hit', () => {
+T('zoning: a faster DODGE into the vslash tile gets hit', () => {
   const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 7, y: 10, facing: 'W' }), [
-    { act: 'slash', dir: 'E' },
+    { act: 'vslash', dir: 'E' },
     { act: 'dodge', path: [C(6, 10)] },
   ]);
   assert.strictEqual(r.state.units[1].hp, 66);
@@ -159,11 +159,11 @@ T('reach never crosses land or the foe', () => {
     }
   }
 });
-T('clash win: loser takes 34 and must WAIT next turn', () => {
+T('clash win: loser takes 34 and enters STAGGERED', () => {
   const c = resolveClash(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'W' }), ['parry', 'thrust']);
-  assert.deepStrictEqual([c.state.units[1].hp, c.state.units[1].stunned], [66, 1]);
-  const n = resolveTurn(c.state, [{ act: 'slash', dir: 'E' }, { act: 'parry', dir: 'W' }]);
-  assert.strictEqual(n.state.units[1].hp, 32, 'stunned unit cannot parry');
+  assert.deepStrictEqual([c.state.units[1].hp, c.state.units[1].st], [66, 1]);
+  const n = resolveTurn(c.state, [{ act: 'vslash', dir: 'E' }, { act: 'parry', dir: 'W' }]);
+  assert.strictEqual(n.state.units[1].hp, 32, 'staggered unit cannot parry');
 });
 T('mirror clash knocks both back', () => {
   const c = resolveClash(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'W' }), ['feint', 'feint']);
@@ -177,10 +177,10 @@ T('GRAB beats PARRY', () => {
   assert.strictEqual(r.state.units[1].hp, 90);
   assert.strictEqual(r.grab, 0);
 });
-T('SLASH (150) beats GRAB (120): grab interrupted', () => {
+T('V-SLASH (150) beats GRAB (120): grab interrupted', () => {
   const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'W' }), [
     { act: 'grab', dir: 'E' },
-    { act: 'slash', dir: 'W' },
+    { act: 'vslash', dir: 'W' },
   ]);
   assert.deepStrictEqual([r.state.units[0].hp, r.state.units[1].hp], [66, 100]);
   assert.ok(has(r, 'interrupt'));
@@ -194,7 +194,7 @@ T('DODGE escapes a GRAB', () => {
 });
 T('KO ends the match', () => {
   const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'N', hp: 20 }), [
-    { act: 'slash', dir: 'E' },
+    { act: 'vslash', dir: 'E' },
     { act: 'wait' },
   ]);
   assert.strictEqual(r.state.over, 'p1');
