@@ -12,10 +12,10 @@ const ctx = {
 };
 vm.createContext(ctx);
 vm.runInContext(
-  src + '\n;globalThis.__api = { resolveTurn, resolveClash, newState, cpuPlan, cpuClashPick, isWalkable, reach };',
+  src + '\n;globalThis.__api = { resolveTurn, resolveClash, resolveThrow, newState, cpuPlan, cpuClashPick, cpuThrowDir, isWalkable, reach };',
   ctx,
 );
-const { resolveTurn, resolveClash, newState, cpuPlan, cpuClashPick, isWalkable, reach } = ctx.__api;
+const { resolveTurn, resolveClash, resolveThrow, newState, cpuPlan, cpuClashPick, cpuThrowDir, isWalkable, reach } = ctx.__api;
 
 const S = (a, b) => {
   const s = newState();
@@ -71,7 +71,7 @@ T('PARRY already facing (170) blocks SLASH (150) from the front', () => {
     { act: 'parry', dir: 'W' },
   ]);
   assert.strictEqual(r.state.units[1].hp, 100);
-  assert.strictEqual(r.state.units[1].energy, 1);
+  assert.strictEqual(r.state.units[1].guts, 1);
 });
 T('PARRY that must turn (130) is too slow vs SLASH (150)', () => {
   const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'N' }), [
@@ -89,13 +89,45 @@ T('face-to-face SLASH at equal speed → clash', () => {
   assert.ok(r.clash);
   assert.strictEqual(r.state.units[0].hp + r.state.units[1].hp, 200);
 });
-T('turning SLASH (110) loses to a ready SLASH (150): no clash', () => {
+T('turning SLASH (110) vs ready SLASH (150) still clashes (within window 40)', () => {
   const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'N' }), [
     { act: 'slash', dir: 'E' },
     { act: 'slash', dir: 'W' },
   ]);
-  assert.ok(!r.clash);
-  assert.deepStrictEqual([r.state.units[0].hp, r.state.units[1].hp], [100, 66]);
+  assert.ok(r.clash);
+});
+T('LUNGE needs momentum (otherwise WAIT)', () => {
+  const r = resolveTurn(S({ x: 4, y: 10, facing: 'E' }, { x: 7, y: 10, facing: 'N' }), [{ act: 'lunge', dir: 'E' }, { act: 'wait' }]);
+  assert.deepStrictEqual([r.state.units[0].x, r.state.units[1].hp], [4, 100]);
+});
+T('MOVE 2 tiles grants momentum; LUNGE dashes 2 and stabs the flank x2', () => {
+  let r = resolveTurn(S({ x: 2, y: 10, facing: 'E' }, { x: 7, y: 10, facing: 'N' }), [
+    { act: 'move', path: [C(3, 10), C(4, 10)] },
+    { act: 'wait' },
+  ]);
+  assert.ok(r.state.units[0].momentum);
+  r = resolveTurn(r.state, [{ act: 'lunge', dir: 'E' }, { act: 'wait' }]);
+  assert.deepStrictEqual([r.state.units[0].x, r.state.units[1].hp], [6, 50]);
+  assert.ok(!r.state.units[0].momentum, 'lunge spends momentum');
+});
+T('GRAB ignores PARRY, then the grabber picks the throw (slam into land = +10)', () => {
+  const r = resolveTurn(S({ x: 3, y: 10, facing: 'W' }, { x: 2, y: 10, facing: 'E' }), [
+    { act: 'grab', dir: 'W' },
+    { act: 'parry', dir: 'E' },
+  ]);
+  assert.strictEqual(r.grab, 0);
+  assert.strictEqual(r.state.units[1].hp, 90);
+  const t = resolveThrow(r.state, 0, 'W');
+  assert.strictEqual(t.state.units[1].hp, 90 - 25, 'thrown into land at x=1 → slam');
+  const o = resolveThrow(r.state, 0, 'S');
+  assert.deepStrictEqual([o.state.units[1].x, o.state.units[1].y, o.state.units[1].hp], [2, 12, 75]);
+});
+T('BURST beats THRUST and FEINT, loses to PARRY, spends guts', () => {
+  const s = S({ x: 5, y: 10, facing: 'E', guts: 3 }, { x: 6, y: 10, facing: 'W' });
+  let c = resolveClash(s, ['burst', 'thrust']);
+  assert.deepStrictEqual([c.state.units[1].hp, c.state.units[1].x, c.state.units[0].guts], [66, 7, 1]);
+  c = resolveClash(s, ['burst', 'parry']);
+  assert.strictEqual(c.state.units[0].hp, 66);
 });
 T('zoning: a faster DODGE into the slashed tile gets hit', () => {
   const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 7, y: 10, facing: 'W' }), [
@@ -127,14 +159,6 @@ T('reach never crosses land or the foe', () => {
     }
   }
 });
-T('charged slash: full energy x1.5 and empties bar', () => {
-  const r = resolveTurn(S({ x: 5, y: 10, facing: 'E', energy: 3 }, { x: 6, y: 10, facing: 'N' }), [
-    { act: 'slash', dir: 'E' },
-    { act: 'wait' },
-  ]);
-  assert.strictEqual(r.state.units[1].hp, 49);
-  assert.strictEqual(r.state.units[0].energy, 0);
-});
 T('clash win: loser takes 34 and must WAIT next turn', () => {
   const c = resolveClash(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'W' }), ['parry', 'thrust']);
   assert.deepStrictEqual([c.state.units[1].hp, c.state.units[1].stunned], [66, 1]);
@@ -145,13 +169,13 @@ T('mirror clash knocks both back', () => {
   const c = resolveClash(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'W' }), ['feint', 'feint']);
   assert.deepStrictEqual([c.state.units[0].x, c.state.units[1].x], [4, 7]);
 });
-T('GRAB beats PARRY: 20 dmg + throw', () => {
+T('GRAB beats PARRY', () => {
   const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'W' }), [
     { act: 'grab', dir: 'E' },
     { act: 'parry', dir: 'W' },
   ]);
-  assert.strictEqual(r.state.units[1].hp, 80);
-  assert.deepStrictEqual([r.state.units[1].x, r.state.units[1].y], [7, 10]);
+  assert.strictEqual(r.state.units[1].hp, 90);
+  assert.strictEqual(r.grab, 0);
 });
 T('SLASH (150) beats GRAB (120): grab interrupted', () => {
   const r = resolveTurn(S({ x: 5, y: 10, facing: 'E' }, { x: 6, y: 10, facing: 'W' }), [
@@ -185,9 +209,11 @@ for (let m = 0; m < 500; m++) {
   while (!s.over && t < 200) {
     const r = resolveTurn(s, [cpuPlan(s, 0), cpuPlan(s, 1)]);
     s = r.state;
-    if (r.clash) s = resolveClash(s, [cpuClashPick(null), cpuClashPick(null)]).state;
+    if (r.clash) s = resolveClash(s, [cpuClashPick(null, s.units[0].guts), cpuClashPick(null, s.units[1].guts)]).state;
+    if (r.grab !== null && r.grab !== undefined && !s.over) s = resolveThrow(s, r.grab, cpuThrowDir(s, r.grab)).state;
     for (const u of s.units) assert.ok(isWalkable(u.x, u.y), 'unit on non-walkable cell');
     assert.ok(!(s.units[0].x === s.units[1].x && s.units[0].y === s.units[1].y), 'units overlap');
+    for (const u of s.units) assert.ok(u.hp >= 0 && u.guts <= 3);
     t++;
   }
   outcomes[s.over || 'timeout']++;

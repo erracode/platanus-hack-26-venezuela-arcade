@@ -38,19 +38,25 @@ const STICK_TO_DIR = { U: 'E', R: 'S', D: 'W', L: 'N' };
 const DIR_KEYS = ['N', 'E', 'S', 'W'];
 const OPPOSITE = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
-// Combat tuning (ROADMAP.md §4).
+// Combat tuning (ROADMAP.md §3–§4).
 const HP_MAX = 100;
 const SLASH_DMG = 34; // 3 clean hits to KO
 const BACK_MULT = 1.5;
-const ENERGY_MAX = 3;
-const CHARGED_MULT = 1.5; // a full energy bar makes the next SLASH charged (and empties it)
-const TURN_PENALTY = 40; // speed lost when a slash/parry/grab must turn first
-const GRAB_DMG = 20;
+const LUNGE_DMG = 25;
+const LUNGE_FLANK = 2; // lunge damage multiplier when hitting a side or the back
+const LUNGE_DASH = 2;
+const GRAB_DMG = 10;
+const THROW_DMG = 15;
+const SLAM_DMG = 10; // extra when the throw hits land / the edge
+const THROW_DIST = 2;
+const GUTS_MAX = 3; // full guts unlock BURST in a clash
+const TURN_PENALTY = 40; // speed lost when a strike/parry/grab must turn first
+const CLASH_WINDOW = 40; // strikes at each other within this speed gap clash
 
 // Timing (ms).
 const TURN_MS = 15000;
 const CLASH_MS = 4000;
-const STEP_MS = 220;
+const STEP_MS = 180;
 const HIT_PAUSE_MS = 550;
 const CLASH_PAUSE_MS = 750;
 const STUN_SHOW_MS = 900;
@@ -186,26 +192,29 @@ function consumePressed(controls, code) {
 }
 
 // == RULES ==
-// Pure functions only (no Phaser). Each side picks ONE action per turn; faster actions resolve
-// first, and a unit hit before it acts loses its action. A plan is { act, dir } or { act, path }.
+// Pure functions only (no Phaser). Each side picks ONE action per turn. Faster actions land first;
+// a unit hit before it acts loses its action. Strikes aimed at each other with close speeds clash.
+// A plan is { act, dir } or { act, path }.
 
 const ACTIONS = {
-  move: { name: 'MOVE', spd: 100, target: 'tile', range: 2, info: ['WALK UP TO 2 TILES', 'SLOW: FASTER ATTACKS LAND FIRST'] },
-  dodge: { name: 'DODGE', spd: 220, target: 'tile', range: 1, info: ['HOP 1 TILE, KEEP FACING', 'VERY FAST: ESCAPE A SLASH'] },
+  move: { name: 'MOVE', spd: 100, target: 'tile', range: 2, info: ['WALK UP TO 2 TILES', '2 TILES = MOMENTUM (UNLOCKS LUNGE)'] },
+  dodge: { name: 'DODGE', spd: 220, target: 'tile', range: 1, info: ['HOP 1 TILE, KEEP FACING', 'VERY FAST: ESCAPE AN ATTACK'] },
   pivot: { name: 'PIVOT', spd: 250, target: 'dir', info: ['TURN TO FACE ANOTHER SIDE', 'FASTEST ACTION'] },
-  slash: { name: 'SLASH', spd: 150, target: 'dir', info: ['34 DMG TO THE TILE IN FRONT', 'X1.5 FROM BEHIND'] },
-  parry: { name: 'PARRY', spd: 170, target: 'dir', info: ['BLOCKS SLASHES FROM THE FRONT', '+1 ENERGY ON A BLOCK'] },
-  grab: { name: 'GRAB', spd: 120, target: 'dir', info: ['20 DMG + THROW, IGNORES PARRY', 'SLOW: A SLASH STOPS IT'] },
+  slash: { name: 'SLASH', spd: 150, target: 'dir', strike: true, info: ['34 DMG TO THE TILE IN FRONT', 'X1.5 FROM BEHIND'] },
+  lunge: { name: 'LUNGE', spd: 200, target: 'dir', strike: true, info: ['DASH 2 TILES + STAB: 25 DMG', 'X2 ON FLANK  NEEDS MOMENTUM'] },
+  parry: { name: 'PARRY', spd: 170, target: 'dir', info: ['BLOCKS STRIKES FROM THE FRONT', '+1 GUTS ON A BLOCK'] },
+  grab: { name: 'GRAB', spd: 120, target: 'dir', info: ['CATCH + THROW: 25 DMG', 'IGNORES PARRY  SLOW'] },
   wait: { name: 'WAIT', spd: 0, target: 'none', info: [] },
 };
 const MOVE_ACTS = ['move', 'dodge', 'pivot'];
-const COMBAT_ACTS = ['slash', 'parry', 'grab'];
+const COMBAT_ACTS = ['slash', 'lunge', 'parry', 'grab'];
 const WAIT_PLAN = { act: 'wait' };
-const BEATS = { parry: 'thrust', feint: 'parry', thrust: 'feint' };
-const CLASH_PICKS = ['thrust', 'parry', 'feint'];
+// Clash picks: parry > thrust > feint > parry; burst beats thrust and feint, loses to parry.
+const CLASH_PICKS = ['thrust', 'parry', 'feint', 'burst'];
+const CLASH_WINS = { parry: ['thrust', 'burst'], thrust: ['feint'], feint: ['parry'], burst: ['thrust', 'feint'] };
 
 function newUnit(start) {
-  return { x: start.x, y: start.y, facing: start.facing, hp: HP_MAX, energy: 0, stunned: 0 };
+  return { x: start.x, y: start.y, facing: start.facing, hp: HP_MAX, guts: 0, momentum: false, stunned: 0 };
 }
 
 function newState() {
@@ -242,10 +251,14 @@ function dirBetween(a, b) {
   return DIR_KEYS.find((k) => same(step(a, k), b)) || null;
 }
 
-// Turning to attack or parry costs speed (ROADMAP.md §3).
+function canUse(u, act) {
+  return act !== 'lunge' || u.momentum;
+}
+
+// Turning before a strike/parry/grab costs speed.
 function speedOf(u, plan) {
   const a = ACTIONS[plan.act];
-  const turns = (plan.act === 'slash' || plan.act === 'parry' || plan.act === 'grab') && plan.dir !== u.facing;
+  const turns = a.target === 'dir' && plan.act !== 'pivot' && plan.dir !== u.facing;
   return a.spd - (turns ? TURN_PENALTY : 0);
 }
 
@@ -273,37 +286,94 @@ function reach(s, i, range) {
   return out;
 }
 
+// Straight dash of up to n tiles, stopping before land or the other unit.
+function dashPath(from, dir, n, other) {
+  const path = [];
+  let c = from;
+  for (let k = 0; k < n; k++) {
+    const t = step(c, dir);
+    if (!isWalkable(t.x, t.y) || same(t, other)) break;
+    path.push(t);
+    c = t;
+  }
+  return path;
+}
+
 // Where a plan would leave a unit if nothing interfered (ghost preview).
-function previewPlan(u, plan) {
+function previewPlan(u, plan, other) {
   const a = ACTIONS[plan.act];
   if (a.target === 'tile' && plan.path && plan.path.length) {
     const last = plan.path[plan.path.length - 1];
     const prev = plan.path.length > 1 ? plan.path[plan.path.length - 2] : u;
-    const facing = plan.act === 'dodge' ? u.facing : dirBetween(prev, last);
-    return { x: last.x, y: last.y, facing };
+    return { x: last.x, y: last.y, facing: plan.act === 'dodge' ? u.facing : dirBetween(prev, last) };
+  }
+  if (plan.act === 'lunge') {
+    const path = dashPath(u, plan.dir, LUNGE_DASH, other);
+    const end = path.length ? path[path.length - 1] : u;
+    return { x: end.x, y: end.y, facing: plan.dir };
   }
   return { x: u.x, y: u.y, facing: a.target === 'dir' ? plan.dir : u.facing };
 }
+
+const gainGuts = (u, n) => (u.guts = Math.min(GUTS_MAX, u.guts + n));
 
 function resolveTurn(state, plans) {
   const s = cloneState(state);
   const U = s.units;
   const events = [];
-  const p = plans.map((plan, i) => (U[i].stunned ? WAIT_PLAN : plan));
+  const p = plans.map((plan, i) => (U[i].stunned || !canUse(U[i], plan.act) ? WAIT_PLAN : plan));
   const spd = p.map((plan, i) => (plan.act === 'wait' ? 0 : speedOf(U[i], plan)));
+  const momentum = U.map((u, i) => p[i].act === 'move' && (p[i].path || []).length === 2);
+  U.forEach((u, i) => p[i].act === 'lunge' && (u.momentum = false));
   events.push({ t: 'order', acts: p.map((x) => x.act), spd });
+
+  // Clash: both strike at each other (after their dashes) with speeds within the clash window.
+  if (ACTIONS[p[0].act].strike && ACTIONS[p[1].act].strike && Math.abs(spd[0] - spd[1]) <= CLASH_WINDOW) {
+    const end = U.map((u, i) => {
+      const path = p[i].act === 'lunge' ? dashPath(u, p[i].dir, LUNGE_DASH, U[1 - i]) : [];
+      return { path, at: path.length ? path[path.length - 1] : u, facing: p[i].dir };
+    });
+    const hits = (i) => same(step(end[i].at, end[i].facing), end[1 - i].at);
+    if (!same(end[0].at, end[1].at) && hits(0) && hits(1)) {
+      U.forEach((u, i) => {
+        u.facing = end[i].facing;
+        if (end[i].path.length) {
+          u.x = end[i].at.x;
+          u.y = end[i].at.y;
+          events.push({ t: 'move', who: i, path: end[i].path, facing: u.facing });
+        } else {
+          events.push({ t: 'face', who: i, facing: u.facing });
+        }
+      });
+      events.push({ t: 'clash' });
+      U.forEach((u, i) => (u.momentum = momentum[i]));
+      return { state: s, events, clash: true };
+    }
+  }
 
   const groups = spd[0] === spd[1] ? [[0, 1]] : spd[0] > spd[1] ? [[0], [1]] : [[1], [0]];
   const cancelled = [false, false];
   const guard = [false, false];
   const done = [false, false];
-  let clash = false;
+  let grab = null;
+
+  const strike = (i, dmg, back, flankMult) => {
+    const foe = U[1 - i];
+    const flank = !same(frontOf(foe), U[i]);
+    const total = Math.round(dmg * (flank ? flankMult : 1));
+    foe.hp = Math.max(0, foe.hp - total);
+    gainGuts(U[i], 1);
+    events.push({ t: 'hit', who: 1 - i, dmg: total, flank: flank && flankMult > 1 });
+    if (!done[1 - i] && !groups.find((g) => g.includes(i)).includes(1 - i) && p[1 - i].act !== 'wait' && !cancelled[1 - i]) {
+      cancelled[1 - i] = true;
+      events.push({ t: 'interrupt', who: 1 - i, act: p[1 - i].act });
+    }
+  };
 
   for (const g of groups) {
     const acting = g.filter((i) => !cancelled[i] && p[i].act !== 'wait');
-    if (acting.length) events.push({ t: 'beat', who: acting, acts: acting.map((i) => p[i].act), spd: spd[acting[0]] });
+    if (acting.length) events.push({ t: 'beat', who: acting });
 
-    // Facing for directional actions.
     for (const i of acting) {
       if (ACTIONS[p[i].act].target === 'dir' && U[i].facing !== p[i].dir) {
         U[i].facing = p[i].dir;
@@ -311,14 +381,16 @@ function resolveTurn(state, plans) {
       }
     }
 
-    // Movement: each path stops before the other unit; equal final cells or a swap → nobody moves.
+    // Movement (walks, hops and lunge dashes). Paths stop before the other unit;
+    // equal final tiles or a swap → nobody moves.
     const walk = {};
     for (const i of acting) {
-      if (ACTIONS[p[i].act].target !== 'tile') continue;
-      const other = U[1 - i];
+      const a = p[i].act;
+      if (a === 'lunge') walk[i] = dashPath(U[i], p[i].dir, LUNGE_DASH, U[1 - i]);
+      if (ACTIONS[a].target !== 'tile') continue;
       const path = [];
       for (const c of p[i].path || []) {
-        if (same(c, other) || !isWalkable(c.x, c.y)) break;
+        if (same(c, U[1 - i]) || !isWalkable(c.x, c.y)) break;
         path.push(c);
       }
       walk[i] = path;
@@ -332,7 +404,7 @@ function resolveTurn(state, plans) {
       if (!walk[i]) continue;
       const path = walk[i];
       if (!path.length) {
-        events.push({ t: 'bump', who: i });
+        if (p[i].act !== 'lunge') events.push({ t: 'bump', who: i });
         continue;
       }
       const last = path[path.length - 1];
@@ -343,7 +415,6 @@ function resolveTurn(state, plans) {
       events.push({ t: 'move', who: i, path, facing: U[i].facing });
     }
 
-    // Parry stance stays up for the rest of the turn.
     for (const i of acting) {
       if (p[i].act === 'parry') {
         guard[i] = true;
@@ -351,76 +422,78 @@ function resolveTurn(state, plans) {
       }
     }
 
-    // Slashes. Equal speed + face to face = clash.
-    const slashers = acting.filter((i) => p[i].act === 'slash');
-    if (slashers.length === 2 && same(frontOf(U[0]), U[1]) && same(frontOf(U[1]), U[0])) {
-      clash = true;
-      events.push({ t: 'clash' });
-      break;
-    }
-    for (const i of slashers) {
+    // Strikes: parry blocks from the front; slash x1.5 from behind, lunge x2 on any flank.
+    for (const i of acting) {
+      if (!ACTIONS[p[i].act].strike) continue;
       const u = U[i];
       const foe = U[1 - i];
       const f = frontOf(u);
-      const charged = u.energy >= ENERGY_MAX;
-      if (charged) u.energy = 0;
-      events.push({ t: 'slash', who: i, x: f.x, y: f.y, charged });
+      events.push({ t: p[i].act, who: i, x: f.x, y: f.y });
       if (!same(f, foe)) {
         events.push({ t: 'miss', who: i });
         continue;
       }
       if (guard[1 - i] && same(frontOf(foe), u)) {
-        foe.energy = Math.min(ENERGY_MAX, foe.energy + 1);
+        gainGuts(foe, 1);
         events.push({ t: 'parry', who: 1 - i });
         continue;
       }
-      const back = same(backOf(foe), u);
-      const dmg = Math.round(SLASH_DMG * (back ? BACK_MULT : 1) * (charged ? CHARGED_MULT : 1));
-      foe.hp = Math.max(0, foe.hp - dmg);
-      events.push({ t: 'hit', who: 1 - i, dmg, back, charged });
-      if (!done[1 - i] && !g.includes(1 - i) && p[1 - i].act !== 'wait' && !cancelled[1 - i]) {
-        cancelled[1 - i] = true;
-        events.push({ t: 'interrupt', who: 1 - i, act: p[1 - i].act });
-      }
+      if (p[i].act === 'slash') strike(i, SLASH_DMG * (same(backOf(foe), u) ? BACK_MULT : 1), false, 1);
+      else strike(i, LUNGE_DMG, false, LUNGE_FLANK);
     }
-    // Grabs ignore parry and throw the foe one tile along the grabber's facing.
+
+    // Grab ignores parry; the throw direction is chosen next (resolveThrow).
     for (const i of acting) {
       if (p[i].act !== 'grab' || cancelled[i]) continue;
-      const u = U[i];
-      const foe = U[1 - i];
-      const f = frontOf(u);
+      const f = frontOf(U[i]);
       events.push({ t: 'grab', who: i, x: f.x, y: f.y });
-      if (!same(f, foe)) {
+      if (!same(f, U[1 - i])) {
         events.push({ t: 'miss', who: i });
         continue;
       }
-      foe.hp = Math.max(0, foe.hp - GRAB_DMG);
-      events.push({ t: 'hit', who: 1 - i, dmg: GRAB_DMG, back: false, charged: false });
-      const to = step(foe, u.facing);
-      if (isWalkable(to.x, to.y)) {
-        foe.x = to.x;
-        foe.y = to.y;
-        events.push({ t: 'knock', who: 1 - i, x: to.x, y: to.y });
-      }
-      if (!done[1 - i] && !g.includes(1 - i) && p[1 - i].act !== 'wait' && !cancelled[1 - i]) {
-        cancelled[1 - i] = true;
-        events.push({ t: 'interrupt', who: 1 - i, act: p[1 - i].act });
-      }
+      strike(i, GRAB_DMG, false, 1);
+      grab = i;
+      events.push({ t: 'caught', who: 1 - i });
+      break;
     }
 
     g.forEach((i) => (done[i] = true));
-    if (U.some((u) => u.hp <= 0)) break;
+    if (grab !== null || U.some((u) => u.hp <= 0)) break;
   }
 
-  U.forEach((u) => (u.stunned = 0));
-  if (!clash) finishTurn(s);
-  return { state: s, events, clash };
+  U.forEach((u, i) => {
+    u.stunned = 0;
+    if (p[i].act !== 'lunge') u.momentum = momentum[i];
+    if (momentum[i]) events.push({ t: 'momentum', who: i });
+  });
+  if (grab === null) finishTurn(s);
+  return { state: s, events, clash: false, grab };
 }
 
-// Face-to-face slash vs slash → rock-paper-scissors (ROADMAP.md §6).
+// Grabber `who` throws the foe up to 2 tiles in `dir`; slamming into land/the edge hurts more.
+function resolveThrow(state, who, dir) {
+  const s = cloneState(state);
+  const me = s.units[who];
+  const foe = s.units[1 - who];
+  const path = dashPath(foe, dir, THROW_DIST, me);
+  const slam = path.length < THROW_DIST;
+  const dmg = THROW_DMG + (slam ? SLAM_DMG : 0);
+  if (path.length) {
+    const last = path[path.length - 1];
+    foe.x = last.x;
+    foe.y = last.y;
+  }
+  foe.hp = Math.max(0, foe.hp - dmg);
+  gainGuts(me, 1);
+  const events = [{ t: 'throw', who, dir }, { t: 'knock', who: 1 - who, path }, { t: 'hit', who: 1 - who, dmg, slam }];
+  finishTurn(s);
+  return { state: s, events };
+}
+
 function resolveClash(state, picks) {
   const s = cloneState(state);
   const events = [];
+  picks.forEach((pk, i) => pk === 'burst' && (s.units[i].guts = 0));
   const [pa, pb] = picks;
   if (pa === pb) {
     events.push({ t: 'mirror', picks });
@@ -429,16 +502,26 @@ function resolveClash(state, picks) {
       if (isWalkable(to.x, to.y) && !same(to, s.units[1 - i])) {
         u.x = to.x;
         u.y = to.y;
-        events.push({ t: 'knock', who: i, x: u.x, y: u.y });
+        events.push({ t: 'knock', who: i, path: [to] });
       }
     });
   } else {
-    const winner = BEATS[pa] === pb ? 0 : 1;
+    const winner = CLASH_WINS[pa].includes(pb) ? 0 : 1;
+    const w = s.units[winner];
     const loser = s.units[1 - winner];
     loser.hp = Math.max(0, loser.hp - SLASH_DMG);
     loser.stunned = 1;
+    gainGuts(w, 1);
     events.push({ t: 'clashWin', who: winner, picks });
-    events.push({ t: 'hit', who: 1 - winner, dmg: SLASH_DMG, back: false, charged: false });
+    events.push({ t: 'hit', who: 1 - winner, dmg: SLASH_DMG });
+    if (picks[winner] === 'burst') {
+      const to = step(loser, w.facing);
+      if (isWalkable(to.x, to.y)) {
+        loser.x = to.x;
+        loser.y = to.y;
+        events.push({ t: 'knock', who: 1 - winner, path: [to] });
+      }
+    }
   }
   finishTurn(s);
   return { state: s, events };
@@ -474,8 +557,17 @@ function cpuPlan(s, i, rnd = Math.random) {
     return { act: 'parry', dir: toFoe };
   }
 
-  // Two apart in a line: zone the middle tile (a slash there hits whoever steps in) or guard it.
+  // Momentum: lunge if the foe is 2-3 tiles away in a straight line.
   const line = DIR_KEYS.find((k) => same(step(step(me, k), k), foe));
+  if (me.momentum) {
+    const lane = DIR_KEYS.find((k) => {
+      const end = dashPath(me, k, LUNGE_DASH, foe);
+      return same(step(end.length ? end[end.length - 1] : me, k), foe);
+    });
+    if (lane && r < 0.75) return { act: 'lunge', dir: lane };
+  }
+
+  // Two apart in a line: zone the middle tile or guard it.
   if (line && r < 0.4) return { act: 'slash', dir: line };
   if (line && r < 0.55) return { act: 'parry', dir: line };
 
@@ -499,9 +591,20 @@ function cpuPlan(s, i, rnd = Math.random) {
   return { act: 'move', path: paths[rnd() < 0.7 ? 0 : Math.min(paths.length - 1, 1 + Math.floor(rnd() * 2))] };
 }
 
-// Light weighting: often counter the opponent's last clash pick.
-function cpuClashPick(lastFoePick, rnd = Math.random) {
-  if (lastFoePick && rnd() < 0.5) return CLASH_PICKS.find((k) => BEATS[k] === lastFoePick);
+// Throw toward land if it slams, otherwise any open direction.
+function cpuThrowDir(s, i, rnd = Math.random) {
+  const foe = s.units[1 - i];
+  const me = s.units[i];
+  const slams = DIR_KEYS.filter((k) => dashPath(foe, k, THROW_DIST, me).length < THROW_DIST && !same(step(foe, k), me));
+  const open = DIR_KEYS.filter((k) => !same(step(foe, k), me));
+  const pool = slams.length ? slams : open;
+  return pool[Math.floor(rnd() * pool.length)];
+}
+
+// Light weighting: often counter the opponent's last clash pick; burst when guts are full.
+function cpuClashPick(lastFoePick, guts = 0, rnd = Math.random) {
+  if (guts >= GUTS_MAX && rnd() < 0.4) return 'burst';
+  if (lastFoePick && rnd() < 0.5) return CLASH_PICKS.find((k) => k !== 'burst' && CLASH_WINS[k].includes(lastFoePick));
   return CLASH_PICKS[Math.floor(rnd() * 3)];
 }
 
@@ -936,8 +1039,8 @@ const MENU_TITLES = ['MOVEMENT', 'COMBAT'];
 const CARDS = [
   ['CATATUMBO PROTOCOL', 'MECHA DUEL ON LAKE MARACAIBO'],
   ['HOW TO PLAY  1/3', 'BOTH MECHS SECRETLY PICK\nONE ACTION AT THE SAME TIME'],
-  ['HOW TO PLAY  2/3', 'FASTER ACTIONS GO FIRST\nPIVOT 250  DODGE 220  PARRY 170\nSLASH 150  GRAB 120  MOVE 100\nTURNING TO STRIKE COSTS 40'],
-  ['HOW TO PLAY  3/3', 'HIT BEFORE YOU ACT = ACTION LOST\nSLASH > GRAB > PARRY > SLASH\nSLASH VS SLASH FACE TO FACE = CLASH'],
+  ['HOW TO PLAY  2/3', 'FASTER ACTIONS LAND FIRST\nGET HIT BEFORE YOU ACT = ACTION LOST\nTURNING TO STRIKE COSTS 40 SPEED'],
+  ['HOW TO PLAY  3/3', 'STRIKE EACH OTHER = SWORD CLASH\nSLASH > GRAB > PARRY > SLASH\nMOVE 2 TILES = MOMENTUM: LUNGE'],
 ];
 
 function txt(scene, x, y, size, color, originX = 0) {
@@ -959,7 +1062,7 @@ function createUi(scene) {
     info: [txt(scene, W / 2, 22, 13, '#ffffff', 0.5), txt(scene, W / 2, 42, 10, '#c8ccd8', 0.5), txt(scene, W / 2, 56, 10, '#c8ccd8', 0.5)],
     phase: txt(scene, W / 2, H - 56, 16, '#ffffff', 0.5),
     hint: txt(scene, W / 2, H - 34, 11, '#9aa0b0', 0.5),
-    menu: [0, 1, 2, 3, 4, 5, 6, 7].map(() => txt(scene, 0, 0, 12, '#ffffff', 0.5)),
+    menu: [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => txt(scene, 0, 0, 12, '#ffffff', 0.5)),
     title: txt(scene, W / 2, 140, 26, '#000000', 0.5).setDepth(11),
     sub: txt(scene, W / 2, 196, 13, '#ffffff', 0.5).setDepth(11),
   };
@@ -1042,6 +1145,7 @@ function lockP1(s, plan) {
 function startAim(s) {
   const me = s.state.units[0];
   const a = ACTIONS[s.sel.act];
+  if (!canUse(me, s.sel.act)) return s.sfx.tick();
   s.sel.dir = me.facing;
   s.sel.cur = null;
   if (a.target === 'tile') {
@@ -1086,13 +1190,25 @@ function handleInput(s, time) {
     return;
   }
   if (s.phase === 'clash') {
-    const i = ['P1_1', 'P1_2', 'P1_3'].findIndex((k) => consumePressed(c, k));
+    const keys = ['P1_1', 'P1_2', 'P1_3'];
+    if (s.state.units[0].guts >= GUTS_MAX) keys.push('P1_4');
+    const i = keys.findIndex((k) => consumePressed(c, k));
     if (i >= 0) {
       s.sfx.blip();
       s.clashResolve(CLASH_PICKS[i]);
     } else if (time > s.deadline) {
       s.clashResolve(CLASH_PICKS[Math.floor(Math.random() * 3)]);
     }
+    return;
+  }
+  if (s.phase === 'throw') {
+    for (const [stick, dir] of Object.entries(STICK_TO_DIR)) {
+      if (consumePressed(c, 'P1_' + stick) && !same(step(s.state.units[1], dir), s.state.units[0])) {
+        s.throwDir = dir;
+        s.sfx.tick();
+      }
+    }
+    if (consumePressed(c, 'P1_1') || time > s.deadline) s.throwResolve(s.throwDir);
     return;
   }
   if (s.phase === 'locked') {
@@ -1154,6 +1270,14 @@ async function lockTurn(s) {
   if (!(await playEvents(s, r.events, token))) return;
   s.state = r.state;
 
+  if (r.grab !== null && r.grab !== undefined && !s.state.over) {
+    const dir = await askThrow(s, r.grab);
+    if (token !== s.token) return;
+    const t = resolveThrow(s.state, r.grab, dir);
+    if (!(await playEvents(s, t.events, token))) return;
+    s.state = t.state;
+  }
+
   if (r.clash) {
     const picks = await askClash(s);
     if (token !== s.token) return;
@@ -1173,9 +1297,24 @@ async function lockTurn(s) {
   if (token === s.token) beginTurn(s);
 }
 
+function askThrow(s, who) {
+  if (s.mode !== 'play' || who !== 0) return wait(s, 400).then(() => cpuThrowDir(s.state, who));
+  const foe = s.state.units[1];
+  s.throwDir = DIR_KEYS.find((k) => !same(step(foe, k), s.state.units[0]));
+  s.phase = 'throw';
+  s.deadline = s.time.now + CLASH_MS;
+  clearPressed(s.controls);
+  return new Promise((res) => {
+    s.throwResolve = (dir) => {
+      s.phase = 'resolve';
+      res(dir);
+    };
+  });
+}
+
 function askClash(s) {
-  const cpu = cpuClashPick(s.lastP1Pick);
-  if (s.mode !== 'play') return wait(s, 600).then(() => [cpuClashPick(null), cpu]);
+  const cpu = cpuClashPick(s.lastP1Pick, s.state.units[1].guts);
+  if (s.mode !== 'play') return wait(s, 600).then(() => [cpuClashPick(null, s.state.units[0].guts), cpu]);
   s.phase = 'clash';
   s.phaseStart = s.time.now;
   s.deadline = s.time.now + CLASH_MS;
@@ -1226,12 +1365,13 @@ async function playEvents(s, events, token) {
     if (token !== s.token) return false;
     const u = v[e.who];
     if (e.t === 'order') {
-      s.banner = e.acts.map((a, i) => actLabel(i) + ACTIONS[a].name + (a === 'wait' ? '' : ' ' + e.spd[i])).join('   VS   ');
-      await wait(s, 500);
-    } else if (e.t === 'beat') {
-      e.who.forEach((w, k) => floatText(s, v[w], ACTIONS[e.acts[k]].name, unitColor(w), 18, 900));
+      // Both actions are revealed together; speed decides what lands first.
+      s.banner = e.acts.map((a, i) => actLabel(i) + ACTIONS[a].name + (a === 'wait' ? '' : ' ' + e.spd[i])).join('  VS  ');
+      e.acts.forEach((a, i) => floatText(s, v[i], ACTIONS[a].name, unitColor(i), 18, 1100));
       s.sfx.tick();
-      await wait(s, 420);
+      await wait(s, 650);
+    } else if (e.t === 'beat') {
+      await wait(s, 80);
     } else if (e.t === 'face') {
       u.facing = e.facing;
       await wait(s, 120);
@@ -1246,9 +1386,9 @@ async function playEvents(s, events, token) {
       addFx(s, { kind: 'guard', who: e.who, dur: 4000 });
       s.sfx.blip();
       await wait(s, 250);
-    } else if (e.t === 'slash' || e.t === 'grab') {
+    } else if (e.t === 'slash' || e.t === 'lunge' || e.t === 'grab') {
       addFx(s, { kind: 'cell', x: e.x, y: e.y, color: unitColor(e.who), dur: 450 });
-      if (e.t === 'slash') addFx(s, { kind: 'sweep', who: e.who, dur: 350 });
+      if (e.t !== 'grab') addFx(s, { kind: 'sweep', who: e.who, dur: 350 });
       s.sfx.swing();
       await wait(s, 260);
     } else if (e.t === 'miss') {
@@ -1257,7 +1397,7 @@ async function playEvents(s, events, token) {
     } else if (e.t === 'hit') {
       u.flash = 1;
       s.dispHp[e.who] = Math.max(0, s.dispHp[e.who] - e.dmg);
-      floatText(s, u, '-' + e.dmg + (e.back ? ' BACK!' : '') + (e.charged ? ' MAX!' : ''), COLORS.white, 17);
+      floatText(s, u, '-' + e.dmg + (e.flank ? ' FLANK!' : '') + (e.slam ? ' SLAM!' : ''), COLORS.white, 17);
       shake(140, 0.008);
       s.sfx.hit();
       await wait(s, HIT_PAUSE_MS);
@@ -1270,14 +1410,23 @@ async function playEvents(s, events, token) {
       floatText(s, u, ACTIONS[e.act].name + ' LOST', COLORS.bolt, 13, 1300);
       await wait(s, 450);
     } else if (e.t === 'knock') {
-      await tweenTo(s, u, e.x, e.y, STEP_MS);
+      for (const c of e.path) await tweenTo(s, u, c.x, c.y, STEP_MS * 0.7);
+    } else if (e.t === 'caught') {
+      floatText(s, u, 'CAUGHT!', COLORS.bolt, 17);
+      s.sfx.hit();
+      await wait(s, 400);
+    } else if (e.t === 'throw') {
+      floatText(s, u, 'THROW!', unitColor(e.who), 17);
+      await wait(s, 200);
+    } else if (e.t === 'momentum') {
+      floatText(s, u, 'MOMENTUM', COLORS.bolt, 13);
     } else if (e.t === 'clash' || e.t === 'mirror') {
       const m = toIso((v[0].gx + v[1].gx) / 2, (v[0].gy + v[1].gy) / 2);
       addFx(s, { kind: 'bolt', pts: makeBoltPoints(m.x, m.y - 24), dur: 550 });
       addFx(s, { kind: 'flash', dur: 180 });
       shake(220, 0.012);
       s.sfx.clash();
-      s.banner = e.t === 'clash' ? 'CLASH!' : 'MIRROR!  BOTH KNOCKED BACK';
+      s.banner = e.t === 'clash' ? 'SWORD CLASH!' : 'MIRROR!  BOTH KNOCKED BACK';
       await wait(s, CLASH_PAUSE_MS);
     } else if (e.t === 'clashWin') {
       floatText(s, u, 'WINS CLASH', unitColor(e.who), 17);
@@ -1327,16 +1476,32 @@ function drawWorld(s, time, delta) {
         const p = toIso(n.x, n.y);
         drawArrow(g, p.x, p.y, stick, dir === sel.dir ? COLORS.white : 0x5a6070);
       }
+      if (sel.act === 'lunge') {
+        const path = dashPath(me, sel.dir, LUNGE_DASH, s.state.units[1]);
+        path.forEach((c) => drawCell(g, c.x, c.y, COLORS.bolt, 0.1, 0.5));
+      }
       if (sel.act !== 'pivot') {
-        const f = step(me, sel.dir);
+        const end = previewPlan(me, { act: sel.act, dir: sel.dir }, s.state.units[1]);
+        const f = step(end, sel.dir);
         const col = sel.act === 'parry' ? COLORS.white : COLORS.cpu;
         drawCell(g, f.x, f.y, col, 0.15 + 0.2 * blink, 0.5 + 0.5 * blink);
       }
     }
     if (s.phase === 'aim') {
       const plan = selPlan(s);
-      if (plan) ghost = previewPlan(me, plan);
+      if (plan) ghost = previewPlan(me, plan, s.state.units[1]);
     }
+  }
+  if (play && s.phase === 'throw') {
+    const foe = s.state.units[1];
+    for (const [stick, dir] of Object.entries(STICK_TO_DIR)) {
+      const n = step(foe, dir);
+      if (same(n, me)) continue;
+      const p = toIso(n.x, n.y);
+      drawArrow(g, p.x, p.y, stick, dir === s.throwDir ? COLORS.white : 0x5a6070);
+    }
+    const path = dashPath(foe, s.throwDir, THROW_DIST, me);
+    path.forEach((c) => drawCell(g, c.x, c.y, COLORS.bolt, 0.15 + 0.15 * blink, 0.8));
   }
 
   const gu = s.gUnits;
@@ -1391,13 +1556,14 @@ function drawHud(s, time) {
       g.fillStyle(color, on ? 1 : 0.15);
       g.fillRect(sx, 37, 16, 8);
     }
-    for (let k = 0; k < ENERGY_MAX; k++) {
+    for (let k = 0; k < GUTS_MAX; k++) {
       const px = i ? W - 38 - k * 16 : 38 + k * 16;
-      g.fillStyle(COLORS.bolt, u.energy > k ? 1 : 0.15);
+      g.fillStyle(COLORS.bolt, u.guts > k ? 1 : 0.15);
       g.fillPoints(rhombus(px, 58, 6, 6), true);
     }
     setT(ui.names[i], (i ? 'CPU' : 'P1') + '  HP ' + Math.max(0, s.dispHp[i]));
-    setT(ui.status[i], u.stunned ? 'STUNNED' : u.energy >= ENERGY_MAX ? 'CHARGED: NEXT SLASH X1.5' : '');
+    const tags = [u.stunned && 'STUNNED', u.momentum && 'MOMENTUM', u.guts >= GUTS_MAX && 'BURST READY'];
+    setT(ui.status[i], 'GUTS  ' + tags.filter(Boolean).join('  '));
   });
 
   // Info panel (top centre): what the highlighted action does.
@@ -1406,7 +1572,9 @@ function drawHud(s, time) {
   if (aiming) {
     const a = ACTIONS[s.sel.act];
     const plan = selPlan(s) || { act: s.sel.act, dir: units[0].facing };
-    info = [a.name + '   SPD ' + speedOf(units[0], plan), a.info[0], a.info[1]];
+    info = canUse(units[0], s.sel.act)
+      ? [a.name + '   SPD ' + speedOf(units[0], plan), a.info[0], a.info[1]]
+      : [a.name + '   LOCKED', 'NEEDS MOMENTUM:', 'MOVE 2 TILES THE TURN BEFORE'];
     drawLabelSlab(g, W / 2 - 134, 10, 260, 58, COLORS.white, false);
   }
   info.forEach((t, k) => setT(ui.info[k], t));
@@ -1427,8 +1595,11 @@ function drawHud(s, time) {
     phase = 'LOCKED IN';
     hint = time > s.cpuReadyAt ? 'BOTH READY' : 'WAITING FOR CPU...';
   } else if (play && s.phase === 'clash') {
-    phase = 'CLASH!  PICK FAST';
-    hint = 'PARRY > THRUST > FEINT > PARRY';
+    phase = 'SWORD CLASH!  PICK FAST';
+    hint = 'PARRY > THRUST > FEINT > PARRY   BURST BEATS THRUST + FEINT';
+  } else if (play && s.phase === 'throw') {
+    phase = 'CAUGHT!  THROW';
+    hint = 'STICK AIM   B1 THROW   (INTO LAND = +10)';
   } else if (s.phase === 'resolve') {
     phase = s.banner;
   }
@@ -1444,25 +1615,26 @@ function drawHud(s, time) {
       items.push({ x, y: p.y - 112, label: MENU_TITLES[ci], header: true });
       col.forEach((act, ri) => {
         const on = s.menuPos.col === ci && s.menuPos.row === ri;
-        items.push({ x, y: p.y - 86 + ri * 26, label: ACTIONS[act].name, on });
+        items.push({ x, y: p.y - 86 + ri * 26, label: ACTIONS[act].name, on, off: !canUse(units[0], act) });
       });
     });
   } else if (play && s.phase === 'clash') {
     const p = toIso((s.view[0].gx + s.view[1].gx) / 2, (s.view[0].gy + s.view[1].gy) / 2);
-    CLASH_OPTS.forEach((label, k) => items.push({ x: Math.min(W - 70, p.x + 110), y: p.y - 90 + k * 28, label, clash: true }));
+    const opts = units[0].guts >= GUTS_MAX ? [...CLASH_OPTS, 'B4 BURST'] : CLASH_OPTS;
+    opts.forEach((label, k) => items.push({ x: Math.min(W - 70, p.x + 110), y: p.y - 90 + k * 28, label, clash: true }));
   }
   ui.menu.forEach((t, k) => {
     const it = items[k];
     t.setVisible(!!it);
     if (!it) return;
     if (!it.header) drawLabelSlab(g, it.x - 52, it.y - 10, 100, 20, it.clash ? COLORS.cpu : COLORS.p1, !!it.on);
-    t.setColor(it.on ? '#000000' : it.header ? hex(COLORS.p1) : '#ffffff');
+    t.setColor(it.on ? '#000000' : it.header ? hex(COLORS.p1) : it.off ? '#5a6070' : '#ffffff');
     t.setPosition(it.x, it.y);
     setT(t, it.label);
   });
 
-  if (play && (s.phase === 'choose' || s.phase === 'aim' || s.phase === 'clash')) {
-    const total = s.phase === 'clash' ? CLASH_MS : TURN_MS;
+  if (play && (s.phase === 'choose' || s.phase === 'aim' || s.phase === 'clash' || s.phase === 'throw')) {
+    const total = s.phase === 'clash' || s.phase === 'throw' ? CLASH_MS : TURN_MS;
     const left = Math.max(0, s.deadline - time) / total;
     g.fillStyle(left < 0.25 ? COLORS.cpu : COLORS.p1, 0.9);
     g.fillRect(W / 2 - 150, H - 16, 300 * left, 4);

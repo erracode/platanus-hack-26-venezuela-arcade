@@ -93,19 +93,22 @@ Each turn both sides secretly pick **one** action. Faster actions resolve first;
 
 | Ring | Action | SPD | Target | Effect |
 |------|--------|:---:|--------|--------|
-| Movement | `MOVE` | 100 | tile ≤ 2 steps | Walk; facing = last step. Slow. Path stops before the other mech. |
-| Movement | `DODGE` | 220 | tile 1 step | Hop, **keeps facing**. Escapes slashes/grabs. |
+| Movement | `MOVE` | 100 | tile ≤ 2 steps | Walk; facing = last step. Walking the full 2 tiles grants **MOMENTUM** for next turn. |
+| Movement | `DODGE` | 220 | tile 1 step | Hop, **keeps facing**. Escapes anything slower. |
 | Movement | `PIVOT` | 250 | direction | Turn in place. |
-| Combat | `SLASH` | 150 | direction | **34** dmg to the front tile; ×1.5 from behind; charged ×1.5 at full energy. |
-| Combat | `PARRY` | 170 | direction | Stance for the rest of the turn: blocks slashes from the front, +1 energy. |
-| Combat | `GRAB` | 120 | direction | 20 dmg + throw 1 tile; **ignores parry**. |
+| Combat | `SLASH` | 150 | direction | **34** dmg to the front tile; ×1.5 from behind. |
+| Combat | `LUNGE` | 200 | direction | **Needs MOMENTUM.** Dash ≤ 2 tiles straight, then stab: 25 dmg, **×2 on a flank**. |
+| Combat | `PARRY` | 170 | direction | Stance for the rest of the turn: blocks strikes from the front, +1 GUTS. |
+| Combat | `GRAB` | 120 | direction | Catch (10 dmg, **ignores parry**) → the grabber picks a **THROW** direction: 15 dmg, +10 if slammed into land. |
 
-Turning to slash/parry/grab (direction ≠ current facing) costs **−40 SPD**.
+Turning to strike/parry/grab (direction ≠ current facing) costs **−40 SPD**.
 
-**Melee triangle:** `SLASH > GRAB > PARRY > SLASH`, and `DODGE` escapes all three if fast enough.
-Face-to-face `SLASH` vs `SLASH` at **equal** speed → clash (§6); at different speeds the faster wins.
+**Melee triangle:** `SLASH > GRAB > PARRY > SLASH`; `DODGE` escapes anything slower.
+**Sword clash:** both mechs strike *at each other* (`SLASH`/`LUNGE`, after dashes) with speeds within
+**40** of each other → clash RPS (§6). Otherwise the faster strike lands and cancels the slower one.
+**GUTS (0–3):** +1 per landed melee hit, parry or throw. Full GUTS unlocks **BURST** in a clash.
 
-Out (kept simple on purpose): Strafe, Jump, Teleport, Block, H/V-Slash, Jab, Lunge, Burst, Guts.
+Out (kept simple on purpose): Strafe, Jump, Teleport, Block, H/V-Slash, Jab, Overdrive, Stagger, missiles.
 
 ---
 
@@ -139,15 +142,16 @@ Implemented in `resolveTurn` (pure); every branch has a test in `tools/test-rule
 
 ## 6. Clash sub-rules (rock-paper-scissors)
 
-Triggered by face-to-face `SLASH` vs `SLASH`. Both secretly pick (short timer, default = random):
+Triggered by mutual strikes within the clash window (§3). Both secretly pick (short timer, default = random):
 
 | Pick | Beats | Loses to |
 |------|-------|----------|
-| `PARRY` | `THRUST` | `FEINT` |
+| `BURST` (full GUTS, spends them) | `THRUST`, `FEINT` | `PARRY` |
+| `PARRY` | `THRUST`, `BURST` | `FEINT` |
 | `FEINT` | `PARRY` | `THRUST` |
 | `THRUST` | `FEINT` | `PARRY` |
 
-- **Winner** deals 34 damage; **loser is `Stunned`** (forced `WAIT`) next turn.
+- **Winner** deals 34 damage; **loser is `Stunned`** (forced `WAIT`) next turn. A winning BURST also knocks the loser back.
 - **Mirror picks** → no damage, both `KnockBack` 1 tile. Big Catatumbo lightning flash.
 - CPU picks with a light weighting (e.g. counter the player's last clash pick) so it feels alive.
 

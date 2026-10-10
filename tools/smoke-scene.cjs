@@ -65,28 +65,37 @@ async function tick(ms) {
 (async () => {
   sceneDef.create.call(scene);
   for (let i = 0; i < 300; i++) await tick(16); // attract mode a few seconds
-  press('Enter'); // start a match
   const keys = ['w', 'a', 's', 'd'];
-  let turns = 0;
-  for (let i = 0; i < 20000 && scene.phase !== 'over'; i++) {
-    if (scene.phase === 'choose') {
-      for (let k = Math.floor(Math.random() * 4); k > 0; k--) press(keys[Math.floor(Math.random() * 4)]);
-      press('u'); // B1 select
-    } else if (scene.phase === 'aim') {
-      press(keys[Math.floor(Math.random() * 4)]);
-      press(Math.random() < 0.1 ? 'i' : 'u'); // sometimes back, mostly confirm
-    } else if (scene.phase === 'clash') {
-      press(['u', 'i', 'o'][Math.floor(Math.random() * 3)]);
+  const seen = new Set();
+  let finished = 0;
+  for (let m = 0; m < 30; m++) {
+    press('Enter'); // start a match
+    for (let i = 0; i < 20000 && scene.phase !== 'over'; i++) {
+      seen.add(scene.phase);
+      if (scene.phase === 'choose') {
+        const [a, b] = scene.state.units;
+        if (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1 && Math.random() < 0.5) {
+          scene.menuPos = { col: 1, row: 3 }; // force GRAB to exercise the throw prompt
+          scene.sel.act = 'grab';
+        } else {
+          for (let k = Math.floor(Math.random() * 5); k > 0; k--) press(keys[Math.floor(Math.random() * 4)]);
+        }
+        press('u'); // B1 select
+      } else if (scene.phase === 'aim') {
+        press(keys[Math.floor(Math.random() * 4)]);
+        press(Math.random() < 0.1 ? 'i' : 'u'); // sometimes back, mostly confirm
+      } else if (scene.phase === 'clash') {
+        press(['u', 'i', 'o', 'j'][Math.floor(Math.random() * 4)]);
+      } else if (scene.phase === 'throw') {
+        press(keys[Math.floor(Math.random() * 4)]);
+        press('u');
+      }
+      await tick(50);
     }
-    const before = scene.state.turn;
-    await tick(50);
-    if (scene.state.turn !== before) turns++;
+    if (scene.phase === 'over') finished++;
+    for (let i = 0; i < 80; i++) await tick(50); // wait out the game-over lockout
   }
-  console.log('match finished:', scene.phase === 'over', 'result:', scene.state.over, 'turns:', turns);
-  for (let i = 0; i < 100; i++) await tick(50);
-  press('Enter');
-  await tick(50);
-  console.log('restart ok:', scene.mode === 'play' && scene.phase === 'choose');
+  console.log('matches finished:', finished, '/ 30   phases seen:', [...seen].sort().join(' '));
 })().catch((e) => {
   console.error('SMOKE FAIL', e);
   process.exitCode = 1;
