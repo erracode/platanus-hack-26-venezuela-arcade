@@ -83,26 +83,29 @@ Observed in the reference (trailer + screenshots):
 
 ---
 
-## 3. Action set
+## 3. Action set (v2 — one action per turn, speed order)
 
-A turn = **one Movement slot + one Combat slot**. Movement resolves before combat (§5).
+Redesigned on 2026-10-10 after the first playtest ("I didn't understand the game"): the reference
+game uses **one action per turn** with **speed**, which is easier to read than move+act slots.
 
-| Ring | Action | Cost | Effect | Tier |
-|------|--------|:----:|--------|------|
-| Movement | `MOVE` | — | Step **1** tile (N/E/S/W). Facing becomes the step direction. | MVP |
-| Movement | `PIVOT` | — | Turn to any facing without moving. | MVP |
-| Movement | *(hold)* | — | Stay; keep facing. | MVP |
-| Combat | `SLASH` | — | Hit the **front** cell (after movement). 25 dmg; **+50%** if it hits the target's **back**. | MVP |
-| Combat | `PARRY` | — | Negates a `SLASH` coming from your **front** cell; on success **+1 ENERGY**. Does nothing vs side/back hits. | MVP |
-| Clash | `THRUST`/`PARRY`/`FEINT` | — | Only on face-to-face `SLASH` vs `SLASH` (§6). | MVP |
-| Special | `LUNGE` | 1 | Dash up to **2** tiles straight, then `SLASH`; on hit **knockback 1**. | STRETCH |
-| Special | `RANGED` | 2 | Shot along facing line; blocked by palafitos / void. | STRETCH |
-| Special | `VENT` | 1 | Repair **+15 HP** and push adjacent enemy **1** tile. | STRETCH |
+Each turn both sides secretly pick **one** action. Faster actions resolve first; a unit that is hit
+**before** its own action resolves **loses that action** ("LOST"). Equal speeds resolve together.
 
-> **Naming:** the base attack is `SLASH`; `THRUST` exists **only** as a clash sub-action. Never mix them.
->
-> **Why facing fixes `PARRY`:** parry only covers the front, so it is not a free safe pick — the
-> opponent can flank (step to your side and slash, or pivot-and-slash from behind).
+| Ring | Action | SPD | Target | Effect |
+|------|--------|:---:|--------|--------|
+| Movement | `MOVE` | 100 | tile ≤ 2 steps | Walk; facing = last step. Slow. Path stops before the other mech. |
+| Movement | `DODGE` | 220 | tile 1 step | Hop, **keeps facing**. Escapes slashes/grabs. |
+| Movement | `PIVOT` | 250 | direction | Turn in place. |
+| Combat | `SLASH` | 150 | direction | **34** dmg to the front tile; ×1.5 from behind; charged ×1.5 at full energy. |
+| Combat | `PARRY` | 170 | direction | Stance for the rest of the turn: blocks slashes from the front, +1 energy. |
+| Combat | `GRAB` | 120 | direction | 20 dmg + throw 1 tile; **ignores parry**. |
+
+Turning to slash/parry/grab (direction ≠ current facing) costs **−40 SPD**.
+
+**Melee triangle:** `SLASH > GRAB > PARRY > SLASH`, and `DODGE` escapes all three if fast enough.
+Face-to-face `SLASH` vs `SLASH` at **equal** speed → clash (§6); at different speeds the faster wins.
+
+Out (kept simple on purpose): Strafe, Jump, Teleport, Block, H/V-Slash, Jab, Lunge, Burst, Guts.
 
 ---
 
@@ -110,7 +113,7 @@ A turn = **one Movement slot + one Combat slot**. Movement resolves before comba
 
 | Meter | Range | Purpose |
 |-------|:-----:|---------|
-| `HP` | 0–100 | Death at 0. `SLASH` 25 (×1.5 from behind). |
+| `HP` | 0–100 | Death at 0. `SLASH` 34 (×1.5 behind), `GRAB` 20. Three clean slashes KO. |
 | `ENERGY` | 0–3 | Shown as pips. Gain: successful `PARRY` (+1), oil tile (stretch). Spend: full bar → next `SLASH` charged ×1.5 (MVP); specials (stretch). |
 | `FACING` | N/E/S/W | Drawn as a chevron on the mecha + on the ghost. |
 
@@ -123,23 +126,14 @@ A turn = **one Movement slot + one Combat slot**. Movement resolves before comba
 
 ## 5. Resolution order (MUST be deterministic)
 
-Resolve in this fixed order every turn:
+1. Stunned units are forced to `WAIT`.
+2. Compute SPD per side (−40 if a strike/parry must turn). Higher SPD group first; ties = one group.
+3. Per group: facing for directional actions → movement (path stops before the other mech; equal
+   final tiles or a swap → nobody moves) → parry stances → slashes (face-to-face equal-speed slashes →
+   clash, stop) → grabs. A hit on a unit whose group has not resolved yet cancels its action.
+4. Stop early on a KO; simultaneous KO → draw. Clear stuns, advance turn.
 
-1. **Self-effects** (`VENT`, stretch).
-2. **Facing**: apply `PIVOT`, and set facing from `MOVE` direction (even if the move is blocked).
-3. **Movement** (`MOVE` / `LUNGE` dash) to destination cells:
-   - Destination not walkable → stay.
-   - Both to the **same** cell → both stay.
-   - **Swap** (A→B's cell and B→A's cell) → both stay.
-4. **Clash check**: both chose `SLASH` **and** each stands in the other's front cell (face-to-face,
-   adjacent) → clash (§6). Skip step 5 for both.
-5. **Slashes**: each `SLASH` targets the attacker's front cell **after movement**. If the enemy is there:
-   - Enemy `PARRY` and attacker is in enemy's front cell → blocked, parrier +1 ENERGY.
-   - Attacker is in enemy's back cell → 25 × 1.5.
-   - Otherwise → 25.
-   Moving away from the threatened cell is a valid dodge.
-6. **Tile effects** (Catatumbo / verdín / oil, §7 — stretch).
-7. **Win/lose** (simultaneous KO → draw); decrement statuses; advance turn.
+Implemented in `resolveTurn` (pure); every branch has a test in `tools/test-rules.cjs`.
 
 ---
 
@@ -153,7 +147,7 @@ Triggered by face-to-face `SLASH` vs `SLASH`. Both secretly pick (short timer, d
 | `FEINT` | `PARRY` | `THRUST` |
 | `THRUST` | `FEINT` | `PARRY` |
 
-- **Winner** deals 25 damage; **loser is `Stunned`** for 1 turn.
+- **Winner** deals 34 damage; **loser is `Stunned`** (forced `WAIT`) next turn.
 - **Mirror picks** → no damage, both `KnockBack` 1 tile. Big Catatumbo lightning flash.
 - CPU picks with a light weighting (e.g. counter the player's last clash pick) so it feels alive.
 
@@ -193,18 +187,18 @@ All VFX procedural. No new art. Real-world basis: duckweed infestation + oil reg
 
 ---
 
-## 8.1 Status (2026-10-09)
+## 8.1 Status (2026-10-10, after v2 turn redesign)
 
 | Phase | State | Notes |
 |-------|-------|-------|
 | P0 | ✅ done | Fork wired in place, skeleton, checks pass |
 | P1 | ✅ done | Traced 14×20 lake, wireframe board, stick mapping validated by user |
-| P2 | 🟡 built, needs visual review | Wire mechas + facing chevron, ghost, threat tile, Persona slabs, HUD panels |
+| P2 | 🟡 v2 built, needs visual review | Two-column action menu + info panel (SPD + description), aim step with reachable tiles / attack tile / arrows, ghost, ✓ when locked, HP bar + tag under each mech |
 | P3 | ✅ rules tested | `resolveTurn` pure; `node tools/test-rules.cjs` covers every §5 branch |
 | P4 | 🟡 built, needs visual review | Clash prompt (B1/B2/B3), RPS, stun, mirror knockback |
-| P5 | ✅ soak-tested | CPU vs CPU: 500/500 matches finish, ~50/50, median 30 turns |
-| P6 | 🟡 first pass | Synth SFX (silent in attract), shake, hit flash, Catatumbo bolt on clash |
-| Attract | 🟡 built | CPU vs CPU demo behind title; START or B1 starts; game over → back to demo after 20 s |
+| P5 | ✅ soak-tested | v2 rules: 500/500 finish, ~50/50, median ~21 turns; `tools/smoke-scene.cjs` plays a full match headless |
+| P6 | 🟡 v2 pass | Step-by-step resolution: order banner, action label per mech, blade sweep, parry shield, MISS / LOST / BLOCKED, damage numbers, shake, bolt |
+| Attract | 🟡 built | CPU vs CPU demo + rotating title / 3 how-to-play cards; START or B1 starts |
 | P7–P8 | ⬜ not started | |
 | P9 | 🟡 cover done | `cover.png` generated by `python tools/make-cover.py` (reads `LAGO_MAP` from `game.js`); submission pending |
 

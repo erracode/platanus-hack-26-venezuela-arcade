@@ -53,14 +53,13 @@ local testing keys. Game logic reads arcade codes (`P1_U`, `P1_1`, …), never r
 | Bottom buttons | `P1_4/5/6` (J/K/L) | `P2_4/5/6` (F/G/H) |
 | Start | `START1` (Enter) | `START2` (2) |
 
-**Our mapping (keep it to joystick + top row, per the organizers' tip):**
+**Our mapping (joystick + 2 buttons):**
 
-| Planning step | Joystick | `_1` | `_2` | `_3` | `_4` |
-|---------------|----------|------|------|------|------|
-| 1. Movement ring | pick direction (ghost previews it; see stick ↔ grid below) | `MOVE` there | `PIVOT` to face it | *hold* | — |
-| 2. Combat ring | — | `SLASH` (locks turn) | `PARRY` (locks turn) | none (locks turn) | back to step 1 |
-| Clash prompt | — | `THRUST` | `PARRY` | `FEINT` | — |
-| Menus / game over | navigate | confirm | — | — | — |
+| Step | Joystick | `_1` | `_2` |
+|------|----------|------|------|
+| 1. Choose | up/down within a column, left/right switches MOVEMENT ↔ COMBAT | select | — |
+| 2. Aim | tile actions: move the cursor over green tiles · direction actions: pick a side (arrows) | confirm (✓) | back |
+| Clash | — | `THRUST` (`_1`) · `PARRY` (`_2`) · `FEINT` (`_3`) | |
 
 `START1` starts / restarts a match.
 
@@ -71,8 +70,7 @@ grid **N = up-left** (strait/bridge at the back-left), **E = up-right** (palafit
 During the Movement step the 4 neighbour cells show ↑ → ↓ ← arrow glyphs so the player sees
 exactly where each stick direction goes.
 
-**Turn timing:** programming window `TURN_MS` (default 10 s — arcade pace; constant). On timeout, whatever is
-selected so far is locked; anything unselected defaults to *hold* / *none*. Clash window
+**Turn timing:** `TURN_MS` 15 s to choose + aim; timeout = `WAIT`. Clash window
 `CLASH_MS` (default 4 s); timeout → random pick. The CPU plans from the **state only** — it never
 reads the player's plan.
 
@@ -92,25 +90,15 @@ reads the player's plan.
 - **Field:** the bridge row and the lake south of it. Gulf + strait are scenery.
 - **Facing:** every mecha faces N/E/S/W (grid directions). Facing decides what `SLASH` hits and
   what `PARRY` covers.
-- **Turn loop:**
-  1. Both sides *secretly* program **1 movement** (`MOVE` / `PIVOT` / hold) + **1 combat**
-     (`SLASH` / `PARRY` / none) via a **two-level radial menu** (`Movement`, `Combat`).
-  2. **Ghost projection** — a semi-transparent clone previews your planned cell + facing; **red
-     threat tiles** show the cell your `SLASH` will hit.
-  3. Timer expires / both lock → **simultaneous resolution** via parallel Phaser `tweens`.
-- **Actions:** `MOVE`, `PIVOT`, `SLASH`, `PARRY` — **MVP** set. Full action list, meters, statuses
-  and the deterministic resolution order are in **`ROADMAP.md` §3–§6** (source of truth).
+- **Turn loop (v2):** both sides secretly pick **one** action (MOVE / DODGE / PIVOT / SLASH /
+  PARRY / GRAB). Faster actions resolve first; getting hit before acting loses your action. Full
+  table, speeds and resolution order: **`ROADMAP.md` §3–§6** (source of truth).
 
-### Combat resolution table
+### Combat resolution (summary)
 
-| A vs B | Outcome |
-|--------|---------|
-| `SLASH` vs `SLASH`, face-to-face adjacent | **Clash** → RPS sub-menu `THRUST`/`PARRY`/`FEINT`; winner deals 25, loser `Stunned`; mirror → both knocked back + Catatumbo lightning |
-| `SLASH` into enemy's **front** while enemy `PARRY` | Blocked, 0 dmg; parrier +1 `ENERGY` |
-| `SLASH` into enemy's **back** | 25 × 1.5 dmg (parry does not cover the back) |
-| `SLASH` into enemy's side / non-parrying front | 25 dmg |
-| `SLASH` at a cell the enemy left | Miss (dodge) |
-| `MOVE` vs `MOVE` | Same destination → both stay; swap → both stay; non-walkable → stay |
+- `SLASH > GRAB > PARRY > SLASH`; `DODGE` (220) escapes anything slower; `MOVE` (100) is the slowest.
+- Face-to-face `SLASH` vs `SLASH` at equal speed → clash RPS; loser takes 34 and is stunned.
+- Turning to strike costs 40 SPD, so facing the right way matters.
 
 ### 2.1 Lake Maracaibo map (procedural, ~0 KB)
 

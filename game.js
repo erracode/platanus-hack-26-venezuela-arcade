@@ -40,19 +40,22 @@ const OPPOSITE = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
 // Combat tuning (ROADMAP.md §4).
 const HP_MAX = 100;
-const SLASH_DMG = 25;
+const SLASH_DMG = 34; // 3 clean hits to KO
 const BACK_MULT = 1.5;
 const ENERGY_MAX = 3;
 const CHARGED_MULT = 1.5; // a full energy bar makes the next SLASH charged (and empties it)
+const TURN_PENALTY = 40; // speed lost when a slash/parry/grab must turn first
+const GRAB_DMG = 20;
 
 // Timing (ms).
-const TURN_MS = 10000;
+const TURN_MS = 15000;
 const CLASH_MS = 4000;
-const STEP_MS = 280;
+const STEP_MS = 220;
 const HIT_PAUSE_MS = 550;
 const CLASH_PAUSE_MS = 750;
 const STUN_SHOW_MS = 900;
-const ATTRACT_TURN_MS = 700;
+const ATTRACT_TURN_MS = 1200;
+const CARD_MS = 3500; // attract-mode how-to-play card rotation
 const ATTRACT_OVER_MS = 2500;
 const OVER_IDLE_MS = 20000;
 
@@ -183,10 +186,21 @@ function consumePressed(controls, code) {
 }
 
 // == RULES ==
-// Pure functions only (no Phaser). A plan is { move: 'hold'|'move'|'pivot', dir, act: 'none'|'slash'|'parry' }.
-// resolveTurn(state, plans) -> { state, events, clash }. Order follows ROADMAP.md §5.
+// Pure functions only (no Phaser). Each side picks ONE action per turn; faster actions resolve
+// first, and a unit hit before it acts loses its action. A plan is { act, dir } or { act, path }.
 
-const HOLD_PLAN = { move: 'hold', dir: 'N', act: 'none' };
+const ACTIONS = {
+  move: { name: 'MOVE', spd: 100, target: 'tile', range: 2, info: ['WALK UP TO 2 TILES', 'SLOW: FASTER ATTACKS LAND FIRST'] },
+  dodge: { name: 'DODGE', spd: 220, target: 'tile', range: 1, info: ['HOP 1 TILE, KEEP FACING', 'VERY FAST: ESCAPE A SLASH'] },
+  pivot: { name: 'PIVOT', spd: 250, target: 'dir', info: ['TURN TO FACE ANOTHER SIDE', 'FASTEST ACTION'] },
+  slash: { name: 'SLASH', spd: 150, target: 'dir', info: ['34 DMG TO THE TILE IN FRONT', 'X1.5 FROM BEHIND'] },
+  parry: { name: 'PARRY', spd: 170, target: 'dir', info: ['BLOCKS SLASHES FROM THE FRONT', '+1 ENERGY ON A BLOCK'] },
+  grab: { name: 'GRAB', spd: 120, target: 'dir', info: ['20 DMG + THROW, IGNORES PARRY', 'SLOW: A SLASH STOPS IT'] },
+  wait: { name: 'WAIT', spd: 0, target: 'none', info: [] },
+};
+const MOVE_ACTS = ['move', 'dodge', 'pivot'];
+const COMBAT_ACTS = ['slash', 'parry', 'grab'];
+const WAIT_PLAN = { act: 'wait' };
 const BEATS = { parry: 'thrust', feint: 'parry', thrust: 'feint' };
 const CLASH_PICKS = ['thrust', 'parry', 'feint'];
 
@@ -208,7 +222,7 @@ function step(p, dir) {
 }
 
 function same(a, b) {
-  return a.x === b.x && a.y === b.y;
+  return !!a && !!b && a.x === b.x && a.y === b.y;
 }
 
 function frontOf(u) {
@@ -228,83 +242,177 @@ function dirBetween(a, b) {
   return DIR_KEYS.find((k) => same(step(a, k), b)) || null;
 }
 
-// Where a plan would leave a unit if nothing blocked it (used for the ghost preview).
-function previewPlan(u, plan) {
-  const facing = plan.move === 'hold' ? u.facing : plan.dir;
-  let pos = { x: u.x, y: u.y };
-  if (plan.move === 'move') {
-    const to = step(u, plan.dir);
-    if (isWalkable(to.x, to.y)) pos = to;
+// Turning to attack or parry costs speed (ROADMAP.md §3).
+function speedOf(u, plan) {
+  const a = ACTIONS[plan.act];
+  const turns = (plan.act === 'slash' || plan.act === 'parry' || plan.act === 'grab') && plan.dir !== u.facing;
+  return a.spd - (turns ? TURN_PENALTY : 0);
+}
+
+// Tiles unit i can reach in up to `range` steps (water only, never through the other unit).
+// Returns Map "x,y" -> path (array of cells, start excluded).
+function reach(s, i, range) {
+  const me = s.units[i];
+  const foe = s.units[1 - i];
+  const out = new Map();
+  const seen = new Set([me.x + ',' + me.y]);
+  const q = [{ x: me.x, y: me.y, path: [] }];
+  while (q.length) {
+    const c = q.shift();
+    if (c.path.length >= range) continue;
+    for (const k of DIR_KEYS) {
+      const n = step(c, k);
+      const key = n.x + ',' + n.y;
+      if (seen.has(key) || !isWalkable(n.x, n.y) || same(n, foe)) continue;
+      seen.add(key);
+      const path = [...c.path, n];
+      out.set(key, path);
+      q.push({ x: n.x, y: n.y, path });
+    }
   }
-  return { x: pos.x, y: pos.y, facing };
+  return out;
+}
+
+// Where a plan would leave a unit if nothing interfered (ghost preview).
+function previewPlan(u, plan) {
+  const a = ACTIONS[plan.act];
+  if (a.target === 'tile' && plan.path && plan.path.length) {
+    const last = plan.path[plan.path.length - 1];
+    const prev = plan.path.length > 1 ? plan.path[plan.path.length - 2] : u;
+    const facing = plan.act === 'dodge' ? u.facing : dirBetween(prev, last);
+    return { x: last.x, y: last.y, facing };
+  }
+  return { x: u.x, y: u.y, facing: a.target === 'dir' ? plan.dir : u.facing };
 }
 
 function resolveTurn(state, plans) {
   const s = cloneState(state);
-  const [a, b] = s.units;
+  const U = s.units;
   const events = [];
-  const p = plans.map((plan, i) => (s.units[i].stunned ? HOLD_PLAN : plan));
+  const p = plans.map((plan, i) => (U[i].stunned ? WAIT_PLAN : plan));
+  const spd = p.map((plan, i) => (plan.act === 'wait' ? 0 : speedOf(U[i], plan)));
+  events.push({ t: 'order', acts: p.map((x) => x.act), spd });
 
-  // 1. Facing (set even if the move ends up blocked).
-  s.units.forEach((u, i) => {
-    if (p[i].move !== 'hold') {
-      u.facing = p[i].dir;
-      events.push({ t: 'face', who: i, facing: u.facing });
+  const groups = spd[0] === spd[1] ? [[0, 1]] : spd[0] > spd[1] ? [[0], [1]] : [[1], [0]];
+  const cancelled = [false, false];
+  const guard = [false, false];
+  const done = [false, false];
+  let clash = false;
+
+  for (const g of groups) {
+    const acting = g.filter((i) => !cancelled[i] && p[i].act !== 'wait');
+    if (acting.length) events.push({ t: 'beat', who: acting, acts: acting.map((i) => p[i].act), spd: spd[acting[0]] });
+
+    // Facing for directional actions.
+    for (const i of acting) {
+      if (ACTIONS[p[i].act].target === 'dir' && U[i].facing !== p[i].dir) {
+        U[i].facing = p[i].dir;
+        events.push({ t: 'face', who: i, facing: U[i].facing });
+      }
     }
-  });
 
-  // 2. Movement: non-walkable, same destination, swap and moving into a standing unit all block.
-  const dest = s.units.map((u, i) => (p[i].move === 'move' ? step(u, p[i].dir) : { x: u.x, y: u.y }));
-  const blocked = s.units.map((u, i) => p[i].move === 'move' && !isWalkable(dest[i].x, dest[i].y));
-  const moving = (i) => p[i].move === 'move' && !blocked[i];
-  if (moving(0) && moving(1)) {
-    if (same(dest[0], dest[1]) || (same(dest[0], b) && same(dest[1], a))) blocked[0] = blocked[1] = true;
-  }
-  for (const i of [0, 1]) {
-    const other = s.units[1 - i];
-    if (moving(i) && !moving(1 - i) && same(dest[i], other)) blocked[i] = true;
-  }
-  s.units.forEach((u, i) => {
-    if (p[i].move !== 'move') return;
-    if (blocked[i]) {
-      events.push({ t: 'bump', who: i, x: dest[i].x, y: dest[i].y });
-    } else {
-      u.x = dest[i].x;
-      u.y = dest[i].y;
-      events.push({ t: 'move', who: i, x: u.x, y: u.y });
+    // Movement: each path stops before the other unit; equal final cells or a swap → nobody moves.
+    const walk = {};
+    for (const i of acting) {
+      if (ACTIONS[p[i].act].target !== 'tile') continue;
+      const other = U[1 - i];
+      const path = [];
+      for (const c of p[i].path || []) {
+        if (same(c, other) || !isWalkable(c.x, c.y)) break;
+        path.push(c);
+      }
+      walk[i] = path;
     }
-  });
+    if (walk[0] && walk[1]) {
+      const a = walk[0][walk[0].length - 1];
+      const b = walk[1][walk[1].length - 1];
+      if (same(a, b) || (same(a, U[1]) && same(b, U[0]))) walk[0] = walk[1] = [];
+    }
+    for (const i of acting) {
+      if (!walk[i]) continue;
+      const path = walk[i];
+      if (!path.length) {
+        events.push({ t: 'bump', who: i });
+        continue;
+      }
+      const last = path[path.length - 1];
+      const prev = path.length > 1 ? path[path.length - 2] : U[i];
+      if (p[i].act !== 'dodge') U[i].facing = dirBetween(prev, last);
+      U[i].x = last.x;
+      U[i].y = last.y;
+      events.push({ t: 'move', who: i, path, facing: U[i].facing });
+    }
 
-  // 3. Clash: both slash while face to face.
-  const clash = p[0].act === 'slash' && p[1].act === 'slash' && same(frontOf(a), b) && same(frontOf(b), a);
-  if (clash) {
-    events.push({ t: 'clash' });
-  } else {
-    // 4. Slashes, evaluated on post-move positions and applied simultaneously.
-    const damage = [0, 0];
-    s.units.forEach((u, i) => {
-      if (p[i].act !== 'slash') return;
+    // Parry stance stays up for the rest of the turn.
+    for (const i of acting) {
+      if (p[i].act === 'parry') {
+        guard[i] = true;
+        events.push({ t: 'guard', who: i });
+      }
+    }
+
+    // Slashes. Equal speed + face to face = clash.
+    const slashers = acting.filter((i) => p[i].act === 'slash');
+    if (slashers.length === 2 && same(frontOf(U[0]), U[1]) && same(frontOf(U[1]), U[0])) {
+      clash = true;
+      events.push({ t: 'clash' });
+      break;
+    }
+    for (const i of slashers) {
+      const u = U[i];
+      const foe = U[1 - i];
+      const f = frontOf(u);
       const charged = u.energy >= ENERGY_MAX;
       if (charged) u.energy = 0;
-      const target = frontOf(u);
-      const foe = s.units[1 - i];
-      events.push({ t: 'slash', who: i, x: target.x, y: target.y, charged });
-      if (!same(target, foe)) return;
-      if (p[1 - i].act === 'parry' && same(frontOf(foe), u)) {
+      events.push({ t: 'slash', who: i, x: f.x, y: f.y, charged });
+      if (!same(f, foe)) {
+        events.push({ t: 'miss', who: i });
+        continue;
+      }
+      if (guard[1 - i] && same(frontOf(foe), u)) {
         foe.energy = Math.min(ENERGY_MAX, foe.energy + 1);
         events.push({ t: 'parry', who: 1 - i });
-        return;
+        continue;
       }
       const back = same(backOf(foe), u);
       const dmg = Math.round(SLASH_DMG * (back ? BACK_MULT : 1) * (charged ? CHARGED_MULT : 1));
-      damage[1 - i] += dmg;
+      foe.hp = Math.max(0, foe.hp - dmg);
       events.push({ t: 'hit', who: 1 - i, dmg, back, charged });
-    });
-    s.units.forEach((u, i) => (u.hp = Math.max(0, u.hp - damage[i])));
+      if (!done[1 - i] && !g.includes(1 - i) && p[1 - i].act !== 'wait' && !cancelled[1 - i]) {
+        cancelled[1 - i] = true;
+        events.push({ t: 'interrupt', who: 1 - i, act: p[1 - i].act });
+      }
+    }
+    // Grabs ignore parry and throw the foe one tile along the grabber's facing.
+    for (const i of acting) {
+      if (p[i].act !== 'grab' || cancelled[i]) continue;
+      const u = U[i];
+      const foe = U[1 - i];
+      const f = frontOf(u);
+      events.push({ t: 'grab', who: i, x: f.x, y: f.y });
+      if (!same(f, foe)) {
+        events.push({ t: 'miss', who: i });
+        continue;
+      }
+      foe.hp = Math.max(0, foe.hp - GRAB_DMG);
+      events.push({ t: 'hit', who: 1 - i, dmg: GRAB_DMG, back: false, charged: false });
+      const to = step(foe, u.facing);
+      if (isWalkable(to.x, to.y)) {
+        foe.x = to.x;
+        foe.y = to.y;
+        events.push({ t: 'knock', who: 1 - i, x: to.x, y: to.y });
+      }
+      if (!done[1 - i] && !g.includes(1 - i) && p[1 - i].act !== 'wait' && !cancelled[1 - i]) {
+        cancelled[1 - i] = true;
+        events.push({ t: 'interrupt', who: 1 - i, act: p[1 - i].act });
+      }
+    }
+
+    g.forEach((i) => (done[i] = true));
+    if (U.some((u) => u.hp <= 0)) break;
   }
 
-  // 5. Stun lasts exactly one turn.
-  s.units.forEach((u) => (u.stunned = 0));
+  U.forEach((u) => (u.stunned = 0));
   if (!clash) finishTurn(s);
   return { state: s, events, clash };
 }
@@ -318,8 +426,7 @@ function resolveClash(state, picks) {
     events.push({ t: 'mirror', picks });
     s.units.forEach((u, i) => {
       const to = step(u, OPPOSITE[u.facing]);
-      const other = s.units[1 - i];
-      if (isWalkable(to.x, to.y) && !same(to, other)) {
+      if (isWalkable(to.x, to.y) && !same(to, s.units[1 - i])) {
         u.x = to.x;
         u.y = to.y;
         events.push({ t: 'knock', who: i, x: u.x, y: u.y });
@@ -351,64 +458,45 @@ function finishTurn(s) {
 function cpuPlan(s, i, rnd = Math.random) {
   const me = s.units[i];
   const foe = s.units[1 - i];
-  if (me.stunned) return HOLD_PLAN;
+  if (me.stunned) return WAIT_PLAN;
+  const r = rnd();
+  const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
 
   if (dist(me, foe) === 1) {
     const toFoe = dirBetween(me, foe);
-    const foeFacesMe = same(frontOf(foe), me);
-    const r = rnd();
-    if (foeFacesMe && r < 0.35) return { move: 'pivot', dir: toFoe, act: 'parry' };
-    if (foeFacesMe && r > 0.85) {
-      const sides = DIR_KEYS.filter((k) => k !== toFoe && k !== OPPOSITE[toFoe]).filter((k) => {
-        const t = step(me, k);
-        return isWalkable(t.x, t.y);
-      });
-      if (sides.length) return { move: 'move', dir: sides[Math.floor(rnd() * sides.length)], act: 'none' };
-    }
-    return { move: 'pivot', dir: toFoe, act: 'slash' };
+    const threatened = same(frontOf(foe), me);
+    if (!threatened) return { act: r < 0.65 ? 'slash' : r < 0.85 ? 'grab' : 'parry', dir: toFoe };
+    if (r < 0.3) return { act: 'slash', dir: toFoe };
+    if (r < 0.55) return { act: 'parry', dir: toFoe };
+    if (r < 0.75) return { act: 'grab', dir: toFoe };
+    const outs = [...reach(s, i, 1).values()].filter((path) => !same(path[0], frontOf(foe)));
+    if (outs.length) return { act: 'dodge', path: pick(outs) };
+    return { act: 'parry', dir: toFoe };
   }
 
-  // Two cells apart in a line: both stepping in would bump forever, so mix the real options —
-  // zone (slash the middle cell, it hits whoever walks in), step in, flank, or parry.
+  // Two apart in a line: zone the middle tile (a slash there hits whoever steps in) or guard it.
   const line = DIR_KEYS.find((k) => same(step(step(me, k), k), foe));
-  if (line) {
-    const r = rnd();
-    if (r < 0.35) return { move: 'pivot', dir: line, act: 'slash' };
-    if (r < 0.6) return { move: 'move', dir: line, act: 'slash' };
-    if (r < 0.85) {
-      const sides = [OPPOSITE[line] === 'N' || OPPOSITE[line] === 'S' ? 'E' : 'N'];
-      sides.push(OPPOSITE[sides[0]]);
-      const ok = sides.filter((k) => {
-        const t = step(me, k);
-        return isWalkable(t.x, t.y);
-      });
-      if (ok.length) return { move: 'move', dir: ok[Math.floor(rnd() * ok.length)], act: 'none' };
-    }
-    return { move: 'pivot', dir: line, act: 'parry' };
+  if (line && r < 0.4) return { act: 'slash', dir: line };
+  if (line && r < 0.55) return { act: 'parry', dir: line };
+
+  // Diagonal neighbours: wait on one of the two tiles the foe can step into.
+  if (Math.abs(me.x - foe.x) === 1 && Math.abs(me.y - foe.y) === 1 && r < 0.6) {
+    const k = pick(DIR_KEYS.filter((d) => dist(step(me, d), foe) === 1));
+    return { act: r < 0.4 ? 'slash' : 'parry', dir: k };
   }
 
-  // Diagonal neighbours: stepping in only rotates both around each other, so mostly wait or
-  // zone one of the two cells the foe can step into.
-  const toward = DIR_KEYS.filter((k) => dist(step(me, k), foe) < dist(me, foe));
-  if (Math.abs(me.x - foe.x) === 1 && Math.abs(me.y - foe.y) === 1) {
-    const r = rnd();
-    const k = toward[Math.floor(rnd() * toward.length)];
-    if (r < 0.45) return { move: 'pivot', dir: k, act: 'slash' };
-    if (r < 0.75) return { move: 'pivot', dir: k, act: 'parry' };
-  }
-  if (rnd() < 0.15) return { move: 'pivot', dir: toward[0] || me.facing, act: 'parry' };
-
-  // Approach: prefer steps that shorten the distance; slash if the step lands us facing the foe.
-  const options = DIR_KEYS.filter((k) => {
-    const t = step(me, k);
-    return isWalkable(t.x, t.y) && !same(t, foe) && dist(t, foe) < dist(me, foe);
-  });
-  if (!options.length) return { move: 'hold', dir: me.facing, act: rnd() < 0.3 ? 'parry' : 'none' };
-  const aligned = options.filter((k) => same(step(step(me, k), k), foe));
-  const dir = aligned.length && rnd() < 0.7 ? aligned[0] : options[Math.floor(rnd() * options.length)];
-  const lands = same(step(step(me, dir), dir), foe);
-  const act = lands && rnd() < 0.6 ? 'slash' : rnd() < 0.2 ? 'parry' : 'none';
-  return { move: 'move', dir, act };
+  // Approach: closest reachable tile, avoiding the foe's front tile and tiles the foe can also
+  // reach this turn (both walking into the same tile bumps forever). Vary among the best few.
+  const paths = [...reach(s, i, 2).values()];
+  if (!paths.length) return { act: 'pivot', dir: me.facing };
+  const foeReach = reach(s, 1 - i, 2);
+  const score = (path) => {
+    const t = path[path.length - 1];
+    const contested = foeReach.has(t.x + ',' + t.y) ? 8 : 0;
+    return dist(t, foe) * 10 + (same(t, frontOf(foe)) ? 15 : 0) + contested + rnd() * 10;
+  };
+  paths.sort((a, b) => score(a) - score(b));
+  return { act: 'move', path: paths[rnd() < 0.7 ? 0 : Math.min(paths.length - 1, 1 + Math.floor(rnd() * 2))] };
 }
 
 // Light weighting: often counter the opponent's last clash pick.
@@ -713,6 +801,59 @@ function makeBoltPoints(x, y) {
   return pts;
 }
 
+const unitColor = (i) => (i ? COLORS.cpu : COLORS.p1);
+
+// "Locked in" check mark above a unit.
+function drawCheck(g, x, y, color) {
+  g.fillStyle(0x000000, 0.85);
+  g.fillCircle(x, y, 9);
+  g.lineStyle(2, color, 1);
+  g.strokeCircle(x, y, 9);
+  g.lineStyle(2.5, COLORS.white, 1);
+  g.lineBetween(x - 4, y, x - 1, y + 4);
+  g.lineBetween(x - 1, y + 4, x + 5, y - 4);
+}
+
+// Small HP bar under a unit.
+function drawMiniBar(g, x, y, frac, color) {
+  g.fillStyle(0x000000, 0.8);
+  g.fillRect(x - 21, y, 42, 5);
+  g.fillStyle(color, 1);
+  g.fillRect(x - 20, y + 1, 40 * Math.max(0, frac), 3);
+}
+
+// The two vertices of the front tile that run across the facing direction (blade streak / shield).
+function frontEdge(gx, gy, facing, at) {
+  const c = toIso(gx, gy);
+  const v = dirVec(facing);
+  const n = Math.hypot(v.x, v.y);
+  const px = (-v.y / n) * TW * 0.32;
+  const py = (v.x / n) * TW * 0.32;
+  const m = { x: c.x + v.x * at, y: c.y + v.y * at };
+  return [
+    { x: m.x + px, y: m.y + py * 0.5 },
+    { x: m.x - px, y: m.y - py * 0.5 },
+  ];
+}
+
+function drawSweep(g, gx, gy, facing, color, a) {
+  const [p, q] = frontEdge(gx, gy, facing, 0.9);
+  const lift = 18;
+  g.lineStyle(6, color, 0.5 * a);
+  g.lineBetween(p.x, p.y - lift, q.x, q.y - lift);
+  g.lineStyle(2, COLORS.white, a);
+  g.lineBetween(p.x, p.y - lift, q.x, q.y - lift);
+}
+
+function drawGuard(g, gx, gy, facing, a) {
+  const [p, q] = frontEdge(gx, gy, facing, 0.5);
+  const quad = [p, q, { x: q.x, y: q.y - 30 }, { x: p.x, y: p.y - 30 }];
+  g.fillStyle(COLORS.white, 0.18 * a);
+  g.fillPoints(quad, true);
+  g.lineStyle(2, COLORS.white, a);
+  g.strokePoints(quad, true);
+}
+
 // == AUDIO ==
 // Web Audio synth: oscillators + noise. Silent in attract mode.
 
@@ -790,10 +931,18 @@ const config = {
 new Phaser.Game(config);
 
 const hex = (n) => '#' + n.toString(16).padStart(6, '0');
+const MENU = [MOVE_ACTS, COMBAT_ACTS];
+const MENU_TITLES = ['MOVEMENT', 'COMBAT'];
+const CARDS = [
+  ['CATATUMBO PROTOCOL', 'MECHA DUEL ON LAKE MARACAIBO'],
+  ['HOW TO PLAY  1/3', 'BOTH MECHS SECRETLY PICK\nONE ACTION AT THE SAME TIME'],
+  ['HOW TO PLAY  2/3', 'FASTER ACTIONS GO FIRST\nPIVOT 250  DODGE 220  PARRY 170\nSLASH 150  GRAB 120  MOVE 100\nTURNING TO STRIKE COSTS 40'],
+  ['HOW TO PLAY  3/3', 'HIT BEFORE YOU ACT = ACTION LOST\nSLASH > GRAB > PARRY > SLASH\nSLASH VS SLASH FACE TO FACE = CLASH'],
+];
 
 function txt(scene, x, y, size, color, originX = 0) {
   return scene.add
-    .text(x, y, '', { fontFamily: 'monospace', fontSize: size + 'px', fontStyle: 'bold', color })
+    .text(x, y, '', { fontFamily: 'monospace', fontSize: size + 'px', fontStyle: 'bold', color, align: 'center' })
     .setOrigin(originX, 0.5)
     .setDepth(10);
 }
@@ -806,11 +955,13 @@ function createUi(scene) {
   return {
     names: [txt(scene, 30, 24, 14, hex(COLORS.p1)), txt(scene, W - 30, 24, 14, hex(COLORS.cpu), 1)],
     status: [txt(scene, 100, 58, 11, '#ffffff'), txt(scene, W - 100, 58, 11, '#ffffff', 1)],
+    tags: [txt(scene, 0, 0, 10, hex(COLORS.p1), 0.5), txt(scene, 0, 0, 10, hex(COLORS.cpu), 0.5)],
+    info: [txt(scene, W / 2, 22, 13, '#ffffff', 0.5), txt(scene, W / 2, 42, 10, '#c8ccd8', 0.5), txt(scene, W / 2, 56, 10, '#c8ccd8', 0.5)],
     phase: txt(scene, W / 2, H - 56, 16, '#ffffff', 0.5),
     hint: txt(scene, W / 2, H - 34, 11, '#9aa0b0', 0.5),
-    opts: [0, 1, 2, 3].map(() => txt(scene, 0, 0, 12, '#ffffff')),
-    title: txt(scene, W / 2, 140, 30, '#000000', 0.5).setDepth(11),
-    sub: txt(scene, W / 2, 188, 14, '#ffffff', 0.5).setDepth(11),
+    menu: [0, 1, 2, 3, 4, 5, 6, 7].map(() => txt(scene, 0, 0, 12, '#ffffff', 0.5)),
+    title: txt(scene, W / 2, 140, 26, '#000000', 0.5).setDepth(11),
+    sub: txt(scene, W / 2, 196, 13, '#ffffff', 0.5).setDepth(11),
   };
 }
 
@@ -825,6 +976,7 @@ function create() {
   this.ui = createUi(this);
   this.sfx = createAudio(this);
   this.token = 0;
+  this.attractStart = 0;
   resetMatch(this, 'attract');
 }
 
@@ -853,6 +1005,8 @@ function resetMatch(s, mode) {
   s.fx = [];
   s.lastP1Pick = null;
   s.clashResolve = null;
+  s.menuPos = { col: 0, row: 0 };
+  if (mode === 'attract') s.attractStart = s.time.now;
   beginTurn(s);
 }
 
@@ -860,6 +1014,8 @@ function beginTurn(s) {
   clearPressed(s.controls);
   const now = s.time.now;
   s.phaseStart = now;
+  s.banner = '';
+  s.fx = s.fx.filter((f) => f.kind !== 'guard');
   if (s.state.over) {
     s.phase = 'over';
     s.deadline = now + (s.mode === 'play' ? OVER_IDLE_MS : ATTRACT_OVER_MS);
@@ -867,14 +1023,50 @@ function beginTurn(s) {
     else s.sfx.lose();
     return;
   }
-  s.phase = 'program';
-  s.deadline = now + (s.mode === 'play' ? TURN_MS : ATTRACT_TURN_MS);
-  s.sel = { step: 'move', dir: s.state.units[0].facing, move: 'hold' };
-  s.banner = s.mode === 'play' ? 'TURN ' + s.state.turn : '';
+  const play = s.mode === 'play';
+  s.cpuPlanned = cpuPlan(s.state, 1);
+  s.cpuReadyAt = now + (play ? 700 + Math.random() * 1800 : ATTRACT_TURN_MS);
+  s.p1Plan = play ? null : cpuPlan(s.state, 0);
+  s.phase = s.p1Plan ? 'locked' : 'choose';
+  s.deadline = now + TURN_MS;
+  s.sel = { act: MENU[s.menuPos.col][s.menuPos.row], dir: s.state.units[0].facing, cur: null };
 }
 
-function planOf(sel, act, holdMove) {
-  return { move: holdMove ? 'hold' : sel.move, dir: sel.dir, act };
+function lockP1(s, plan) {
+  s.p1Plan = plan;
+  s.phase = 'locked';
+  s.sfx.lock();
+}
+
+// Start aiming the highlighted action.
+function startAim(s) {
+  const me = s.state.units[0];
+  const a = ACTIONS[s.sel.act];
+  s.sel.dir = me.facing;
+  s.sel.cur = null;
+  if (a.target === 'tile') {
+    s.sel.valid = reach(s.state, 0, a.range);
+    const foe = s.state.units[1];
+    let best = null;
+    for (const path of s.sel.valid.values()) {
+      const t = path[path.length - 1];
+      if (!best || dist(t, foe) < dist(best, foe)) best = t;
+    }
+    if (!best) return s.sfx.tick();
+    s.sel.cur = { x: best.x, y: best.y };
+  }
+  s.phase = 'aim';
+  s.sfx.blip();
+}
+
+// The plan the current selection describes (also drives the ghost preview).
+function selPlan(s) {
+  const a = ACTIONS[s.sel.act];
+  if (a.target === 'tile') {
+    const path = s.sel.cur && s.sel.valid.get(s.sel.cur.x + ',' + s.sel.cur.y);
+    return path ? { act: s.sel.act, path } : null;
+  }
+  return { act: s.sel.act, dir: s.sel.dir };
 }
 
 function handleInput(s, time) {
@@ -883,7 +1075,7 @@ function handleInput(s, time) {
 
   if (s.mode === 'attract') {
     if (start()) return resetMatch(s, 'play');
-    if (s.phase === 'program' && time > s.deadline) lockTurn(s, null);
+    if (s.phase === 'locked' && time > s.cpuReadyAt) lockTurn(s);
     if (s.phase === 'over' && time > s.deadline) resetMatch(s, 'attract');
     return;
   }
@@ -903,53 +1095,62 @@ function handleInput(s, time) {
     }
     return;
   }
-  if (s.phase !== 'program') return;
-
-  if (s.state.units[0].stunned) {
-    if (time > s.phaseStart + STUN_SHOW_MS) lockTurn(s, HOLD_PLAN);
+  if (s.phase === 'locked') {
+    if (time > s.cpuReadyAt + 300) lockTurn(s);
     return;
   }
-  const sel = s.sel;
-  if (sel.step === 'move') {
-    for (const [stick, dir] of Object.entries(STICK_TO_DIR)) {
-      if (consumePressed(c, 'P1_' + stick)) {
-        sel.dir = dir;
-        s.sfx.tick();
-      }
-    }
-    const pick = [
-      ['P1_1', 'move'],
-      ['P1_2', 'pivot'],
-      ['P1_3', 'hold'],
-    ].find(([k]) => consumePressed(c, k));
-    if (pick) {
-      sel.move = pick[1];
-      sel.step = 'act';
-      s.sfx.blip();
-    }
-  } else {
-    if (consumePressed(c, 'P1_4')) {
-      sel.step = 'move';
-      s.sfx.tick();
-      return;
-    }
-    const pick = [
-      ['P1_1', 'slash'],
-      ['P1_2', 'parry'],
-      ['P1_3', 'none'],
-    ].find(([k]) => consumePressed(c, k));
-    if (pick) return lockTurn(s, planOf(sel, pick[1]));
+  if (s.phase !== 'choose' && s.phase !== 'aim') return;
+
+  if (s.state.units[0].stunned) {
+    if (time > s.phaseStart + STUN_SHOW_MS) lockP1(s, WAIT_PLAN);
+    return;
   }
-  if (time > s.deadline) lockTurn(s, planOf(sel, 'none', sel.step === 'move'));
+  if (time > s.deadline) return lockP1(s, WAIT_PLAN);
+
+  const sel = s.sel;
+  if (s.phase === 'choose') {
+    const m = s.menuPos;
+    const col = MENU[m.col];
+    if (consumePressed(c, 'P1_U')) m.row = (m.row + col.length - 1) % col.length;
+    else if (consumePressed(c, 'P1_D')) m.row = (m.row + 1) % col.length;
+    else if (consumePressed(c, 'P1_L') || consumePressed(c, 'P1_R')) {
+      m.col = 1 - m.col;
+      m.row = Math.min(m.row, MENU[m.col].length - 1);
+    } else if (consumePressed(c, 'P1_1')) return startAim(s);
+    else return;
+    sel.act = MENU[m.col][m.row];
+    s.sfx.tick();
+    return;
+  }
+
+  // Aiming.
+  if (consumePressed(c, 'P1_2')) {
+    s.phase = 'choose';
+    s.sfx.tick();
+    return;
+  }
+  for (const [stick, dir] of Object.entries(STICK_TO_DIR)) {
+    if (!consumePressed(c, 'P1_' + stick)) continue;
+    s.sfx.tick();
+    if (ACTIONS[sel.act].target === 'dir') {
+      sel.dir = dir;
+    } else {
+      const n = step(sel.cur, dir);
+      const me = s.state.units[0];
+      if (sel.valid.has(n.x + ',' + n.y) || same(n, me)) sel.cur = n;
+    }
+  }
+  if (consumePressed(c, 'P1_1')) {
+    const plan = selPlan(s);
+    if (plan) lockP1(s, plan);
+    else s.sfx.tick();
+  }
 }
 
-async function lockTurn(s, p1Plan) {
+async function lockTurn(s) {
   const token = s.token;
   s.phase = 'resolve';
-  s.banner = '';
-  s.sfx.lock();
-  const p0 = s.mode === 'play' ? p1Plan : cpuPlan(s.state, 0);
-  const r = resolveTurn(s.state, [p0, cpuPlan(s.state, 1)]);
+  const r = resolveTurn(s.state, [s.p1Plan, s.cpuPlanned]);
   if (!(await playEvents(s, r.events, token))) return;
   s.state = r.state;
 
@@ -968,13 +1169,13 @@ async function lockTurn(s, p1Plan) {
     const u = s.state.units[i];
     Object.assign(v, { gx: u.x, gy: u.y, facing: u.facing });
   });
-  await wait(s, 250);
+  await wait(s, 450);
   if (token === s.token) beginTurn(s);
 }
 
 function askClash(s) {
   const cpu = cpuClashPick(s.lastP1Pick);
-  if (s.mode !== 'play') return wait(s, 500).then(() => [cpuClashPick(null), cpu]);
+  if (s.mode !== 'play') return wait(s, 600).then(() => [cpuClashPick(null), cpu]);
   s.phase = 'clash';
   s.phaseStart = s.time.now;
   s.deadline = s.time.now + CLASH_MS;
@@ -988,17 +1189,9 @@ function askClash(s) {
   });
 }
 
-function tweenTo(s, o, x, y, frac) {
+function tweenTo(s, o, x, y, ms, yoyo) {
   return new Promise((res) =>
-    s.tweens.add({
-      targets: o,
-      gx: o.gx + (x - o.gx) * frac,
-      gy: o.gy + (y - o.gy) * frac,
-      duration: frac < 1 ? STEP_MS / 2 : STEP_MS,
-      yoyo: frac < 1,
-      ease: 'Sine.easeInOut',
-      onComplete: res,
-    }),
+    s.tweens.add({ targets: o, gx: x, gy: y, duration: ms, yoyo: !!yoyo, ease: 'Sine.easeInOut', onComplete: res }),
   );
 }
 
@@ -1007,12 +1200,12 @@ function addFx(s, fx) {
   s.fx.push(fx);
 }
 
-function floatText(s, o, str, color) {
+function floatText(s, o, str, color, size = 15, life = 1000) {
   const p = toIso(o.gx, o.gy);
   const t = s.add
-    .text(p.x, p.y - 50, str, {
+    .text(p.x, p.y - 62, str, {
       fontFamily: 'monospace',
-      fontSize: '15px',
+      fontSize: size + 'px',
       fontStyle: 'bold',
       color: hex(color),
       stroke: '#000000',
@@ -1020,56 +1213,77 @@ function floatText(s, o, str, color) {
     })
     .setOrigin(0.5)
     .setDepth(12);
-  s.tweens.add({ targets: t, y: t.y - 30, alpha: 0, duration: 1000, onComplete: () => t.destroy() });
+  s.tweens.add({ targets: t, y: t.y - 26, alpha: 0, delay: life * 0.4, duration: life * 0.6, onComplete: () => t.destroy() });
 }
 
-// Animate one resolution: movement first (in parallel), then combat effects.
+const actLabel = (i) => (i ? 'CPU ' : 'P1 ');
+
+// Play one resolution step by step so the order of actions reads clearly.
 async function playEvents(s, events, token) {
   const v = s.view;
-  const moves = [];
-  for (const e of events) {
-    if (e.t === 'face') v[e.who].facing = e.facing;
-    else if (e.t === 'move' || e.t === 'knock') moves.push(tweenTo(s, v[e.who], e.x, e.y, 1));
-    else if (e.t === 'bump') moves.push(tweenTo(s, v[e.who], e.x, e.y, 0.4));
-  }
-  if (moves.length) {
-    s.sfx.move();
-    await Promise.all(moves);
-  }
-  if (token !== s.token) return false;
-
-  let pause = 0;
   const shake = (ms, k) => s.cameras.main.shake(ms, k);
   for (const e of events) {
+    if (token !== s.token) return false;
     const u = v[e.who];
-    if (e.t === 'slash') {
-      addFx(s, { kind: 'cell', x: e.x, y: e.y, color: e.who ? COLORS.cpu : COLORS.p1, dur: 350 });
+    if (e.t === 'order') {
+      s.banner = e.acts.map((a, i) => actLabel(i) + ACTIONS[a].name + (a === 'wait' ? '' : ' ' + e.spd[i])).join('   VS   ');
+      await wait(s, 500);
+    } else if (e.t === 'beat') {
+      e.who.forEach((w, k) => floatText(s, v[w], ACTIONS[e.acts[k]].name, unitColor(w), 18, 900));
+      s.sfx.tick();
+      await wait(s, 420);
+    } else if (e.t === 'face') {
+      u.facing = e.facing;
+      await wait(s, 120);
+    } else if (e.t === 'move') {
+      s.sfx.move();
+      for (const c of e.path) await tweenTo(s, u, c.x, c.y, STEP_MS);
+      u.facing = e.facing;
+    } else if (e.t === 'bump') {
+      floatText(s, u, 'BLOCKED', COLORS.white, 12);
+      await wait(s, 300);
+    } else if (e.t === 'guard') {
+      addFx(s, { kind: 'guard', who: e.who, dur: 4000 });
+      s.sfx.blip();
+      await wait(s, 250);
+    } else if (e.t === 'slash' || e.t === 'grab') {
+      addFx(s, { kind: 'cell', x: e.x, y: e.y, color: unitColor(e.who), dur: 450 });
+      if (e.t === 'slash') addFx(s, { kind: 'sweep', who: e.who, dur: 350 });
       s.sfx.swing();
-      pause = Math.max(pause, HIT_PAUSE_MS);
+      await wait(s, 260);
+    } else if (e.t === 'miss') {
+      floatText(s, u, 'MISS', 0x9aa0b0, 14);
+      await wait(s, 350);
     } else if (e.t === 'hit') {
       u.flash = 1;
       s.dispHp[e.who] = Math.max(0, s.dispHp[e.who] - e.dmg);
-      floatText(s, u, '-' + e.dmg + (e.back ? ' BACK' : '') + (e.charged ? ' MAX' : ''), COLORS.white);
+      floatText(s, u, '-' + e.dmg + (e.back ? ' BACK!' : '') + (e.charged ? ' MAX!' : ''), COLORS.white, 17);
       shake(140, 0.008);
       s.sfx.hit();
-      pause = Math.max(pause, HIT_PAUSE_MS);
+      await wait(s, HIT_PAUSE_MS);
     } else if (e.t === 'parry') {
-      floatText(s, u, 'PARRY +1', COLORS.coast);
+      floatText(s, u, 'PARRY! +1', COLORS.coast, 17);
+      addFx(s, { kind: 'flash', dur: 120 });
       s.sfx.parry();
-      pause = Math.max(pause, HIT_PAUSE_MS);
+      await wait(s, HIT_PAUSE_MS);
+    } else if (e.t === 'interrupt') {
+      floatText(s, u, ACTIONS[e.act].name + ' LOST', COLORS.bolt, 13, 1300);
+      await wait(s, 450);
+    } else if (e.t === 'knock') {
+      await tweenTo(s, u, e.x, e.y, STEP_MS);
     } else if (e.t === 'clash' || e.t === 'mirror') {
       const m = toIso((v[0].gx + v[1].gx) / 2, (v[0].gy + v[1].gy) / 2);
-      addFx(s, { kind: 'bolt', pts: makeBoltPoints(m.x, m.y - 24), dur: 500 });
-      addFx(s, { kind: 'flash', dur: 160 });
+      addFx(s, { kind: 'bolt', pts: makeBoltPoints(m.x, m.y - 24), dur: 550 });
+      addFx(s, { kind: 'flash', dur: 180 });
       shake(220, 0.012);
       s.sfx.clash();
-      s.banner = e.t === 'clash' ? 'CLASH!' : 'MIRROR!';
-      pause = Math.max(pause, CLASH_PAUSE_MS);
+      s.banner = e.t === 'clash' ? 'CLASH!' : 'MIRROR!  BOTH KNOCKED BACK';
+      await wait(s, CLASH_PAUSE_MS);
     } else if (e.t === 'clashWin') {
-      floatText(s, u, 'WINS CLASH', e.who ? COLORS.cpu : COLORS.p1);
+      floatText(s, u, 'WINS CLASH', unitColor(e.who), 17);
+      await wait(s, 300);
     }
   }
-  if (pause) await wait(s, pause);
   return token === s.token;
 }
 
@@ -1087,46 +1301,68 @@ function drawWorld(s, time, delta) {
     }
   }
 
-  // Planning previews: stick arrows, ghost, threat tile.
+  // Planning previews: reachable tiles, aim arrows, ghost, attack tile.
   let ghost = null;
   const me = s.state.units[0];
-  if (s.mode === 'play' && s.phase === 'program' && !me.stunned) {
+  const play = s.mode === 'play';
+  const blink = 0.5 + 0.5 * Math.sin(time / 90);
+  if (play && (s.phase === 'choose' || s.phase === 'aim') && !me.stunned) {
     const sel = s.sel;
-    if (sel.step === 'move') {
+    const a = ACTIONS[sel.act];
+    if (s.phase === 'aim' && a.target === 'tile') {
+      for (const path of sel.valid.values()) {
+        const t = path[path.length - 1];
+        drawCell(g, t.x, t.y, COLORS.coast, 0.12, 0.45);
+      }
+      const path = sel.valid.get(sel.cur.x + ',' + sel.cur.y);
+      if (path) {
+        g.lineStyle(2, COLORS.white, 0.8);
+        g.strokePoints([me, ...path].map((c) => toIso(c.x, c.y)), false);
+      }
+      drawCell(g, sel.cur.x, sel.cur.y, COLORS.white, 0.15 + 0.15 * blink, 1);
+    }
+    if (s.phase === 'aim' && a.target === 'dir') {
       for (const [stick, dir] of Object.entries(STICK_TO_DIR)) {
         const n = step(me, dir);
-        if (!isWalkable(n.x, n.y)) continue;
-        if (dir === sel.dir) drawCell(g, n.x, n.y, COLORS.p1, 0.12, 0.6);
         const p = toIso(n.x, n.y);
-        drawArrow(g, p.x, p.y, stick, COLORS.white);
+        drawArrow(g, p.x, p.y, stick, dir === sel.dir ? COLORS.white : 0x5a6070);
       }
-      ghost = previewPlan(me, { move: 'move', dir: sel.dir });
-    } else {
-      ghost = previewPlan(me, { move: sel.move, dir: sel.dir });
-      const f = step(ghost, ghost.facing);
-      const blink = 0.5 + 0.5 * Math.sin(time / 90);
-      drawCell(g, f.x, f.y, COLORS.cpu, 0.15 + 0.2 * blink, 0.5 + 0.5 * blink);
+      if (sel.act !== 'pivot') {
+        const f = step(me, sel.dir);
+        const col = sel.act === 'parry' ? COLORS.white : COLORS.cpu;
+        drawCell(g, f.x, f.y, col, 0.15 + 0.2 * blink, 0.5 + 0.5 * blink);
+      }
+    }
+    if (s.phase === 'aim') {
+      const plan = selPlan(s);
+      if (plan) ghost = previewPlan(me, plan);
     }
   }
 
   const gu = s.gUnits;
   gu.clear();
-  const order = s.view
-    .map((v, i) => ({ v, i }))
-    .sort((a, b) => a.v.gy - a.v.gx - (b.v.gy - b.v.gx));
+  const order = s.view.map((v, i) => ({ v, i })).sort((a, b) => a.v.gy - a.v.gx - (b.v.gy - b.v.gx));
   for (const { v, i } of order) {
     v.flash = Math.max(0, v.flash - delta / 250);
     if (i === 0 && ghost) drawMecha(gu, ghost.x, ghost.y, ghost.facing, COLORS.p1, 0.35, 0);
-    drawMecha(gu, v.gx, v.gy, v.facing, i ? COLORS.cpu : COLORS.p1, 1, v.flash);
+    drawMecha(gu, v.gx, v.gy, v.facing, unitColor(i), 1, v.flash);
+    const p = toIso(v.gx, v.gy);
+    drawMiniBar(gu, p.x, p.y + 12, s.dispHp[i] / HP_MAX, unitColor(i));
+    s.ui.tags[i].setPosition(p.x, p.y + 25);
+    setT(s.ui.tags[i], i ? 'CPU' : 'P1');
+    const ready = i === 0 ? !!s.p1Plan && s.phase === 'locked' : s.phase === 'locked' || (play && (s.phase === 'choose' || s.phase === 'aim') && time > s.cpuReadyAt);
+    if (ready) drawCheck(gu, p.x + 16, p.y - 50, unitColor(i));
   }
 
   const gt = s.gTop;
   gt.clear();
   s.fx = s.fx.filter((f) => f.until > time);
   for (const f of s.fx) {
-    const a = (f.until - time) / f.dur;
+    const a = Math.min(1, (f.until - time) / Math.min(f.dur, 400));
     if (f.kind === 'bolt') drawBolt(gt, { pts: f.pts, until: f.until, now: time, dur: f.dur });
     else if (f.kind === 'cell') drawCell(gt, f.x, f.y, f.color, 0.4 * a, a);
+    else if (f.kind === 'sweep') drawSweep(gt, s.view[f.who].gx, s.view[f.who].gy, s.view[f.who].facing, unitColor(f.who), a);
+    else if (f.kind === 'guard') drawGuard(gt, s.view[f.who].gx, s.view[f.who].gy, s.view[f.who].facing, a);
     else if (f.kind === 'flash') {
       gt.fillStyle(COLORS.white, 0.35 * a);
       gt.fillRect(0, 0, W, H);
@@ -1134,32 +1370,18 @@ function drawWorld(s, time, delta) {
   }
 }
 
-const MOVE_OPTS = [
-  ['B1', 'MOVE'],
-  ['B2', 'PIVOT'],
-  ['B3', 'HOLD'],
-];
-const ACT_OPTS = [
-  ['B1', 'SLASH'],
-  ['B2', 'PARRY'],
-  ['B3', 'NONE'],
-  ['B4', 'BACK'],
-];
-const CLASH_OPTS = [
-  ['B1', 'THRUST'],
-  ['B2', 'PARRY'],
-  ['B3', 'FEINT'],
-];
+const CLASH_OPTS = ['B1 THRUST', 'B2 PARRY', 'B3 FEINT'];
 
 function drawHud(s, time) {
   const g = s.gUi;
   const ui = s.ui;
   g.clear();
   const units = s.state.units;
+  const play = s.mode === 'play';
 
-  // Corner panels: name, segmented HP, energy pips, status.
+  // Corner panels: name + HP, segmented HP, energy pips, status.
   [0, 1].forEach((i) => {
-    const color = i ? COLORS.cpu : COLORS.p1;
+    const color = unitColor(i);
     const x0 = i ? W - 262 : 12;
     drawLabelSlab(g, x0, 10, 242, 62, color, false);
     const u = units[i];
@@ -1174,80 +1396,100 @@ function drawHud(s, time) {
       g.fillStyle(COLORS.bolt, u.energy > k ? 1 : 0.15);
       g.fillPoints(rhombus(px, 58, 6, 6), true);
     }
-    setT(ui.names[i], (i ? 'CPU' : 'P1') + '  ' + Math.max(0, s.dispHp[i]));
-    const st = u.stunned ? 'STUNNED' : u.energy >= ENERGY_MAX ? 'CHARGED' : '';
-    setT(ui.status[i], st);
+    setT(ui.names[i], (i ? 'CPU' : 'P1') + '  HP ' + Math.max(0, s.dispHp[i]));
+    setT(ui.status[i], u.stunned ? 'STUNNED' : u.energy >= ENERGY_MAX ? 'CHARGED: NEXT SLASH X1.5' : '');
   });
 
+  // Info panel (top centre): what the highlighted action does.
+  let info = ['', '', ''];
+  const aiming = play && (s.phase === 'choose' || s.phase === 'aim') && !units[0].stunned;
+  if (aiming) {
+    const a = ACTIONS[s.sel.act];
+    const plan = selPlan(s) || { act: s.sel.act, dir: units[0].facing };
+    info = [a.name + '   SPD ' + speedOf(units[0], plan), a.info[0], a.info[1]];
+    drawLabelSlab(g, W / 2 - 134, 10, 260, 58, COLORS.white, false);
+  }
+  info.forEach((t, k) => setT(ui.info[k], t));
+
   // Phase label + hints + timer.
-  const play = s.mode === 'play';
   let phase = '';
   let hint = '';
-  let opts = [];
-  let anchor = null;
-  let optColor = COLORS.p1;
-  if (play && s.phase === 'program') {
-    if (units[0].stunned) {
-      phase = 'STUNNED';
-      hint = 'YOU CANNOT ACT THIS TURN';
-    } else if (s.sel.step === 'move') {
-      phase = (s.banner ? s.banner + '  ' : '') + 'MOVEMENT';
-      hint = 'STICK AIM   B1 MOVE   B2 PIVOT   B3 HOLD';
-      opts = MOVE_OPTS;
-    } else {
-      phase = 'COMBAT';
-      hint = 'B1 SLASH   B2 PARRY   B3 NONE   B4 BACK';
-      opts = ACT_OPTS;
-    }
-    anchor = toIso(s.view[0].gx, s.view[0].gy);
+  if (play && aiming && s.phase === 'choose') {
+    phase = 'TURN ' + s.state.turn + '  PICK AN ACTION';
+    hint = 'STICK CHOOSE   B1 SELECT';
+  } else if (play && aiming) {
+    phase = 'AIM ' + ACTIONS[s.sel.act].name;
+    hint = 'STICK AIM   B1 CONFIRM   B2 BACK';
+  } else if (play && s.phase === 'choose') {
+    phase = 'STUNNED';
+    hint = 'YOU LOST THE CLASH: NO ACTION THIS TURN';
+  } else if (play && s.phase === 'locked') {
+    phase = 'LOCKED IN';
+    hint = time > s.cpuReadyAt ? 'BOTH READY' : 'WAITING FOR CPU...';
   } else if (play && s.phase === 'clash') {
     phase = 'CLASH!  PICK FAST';
     hint = 'PARRY > THRUST > FEINT > PARRY';
-    opts = CLASH_OPTS;
-    optColor = COLORS.cpu;
-    anchor = toIso((s.view[0].gx + s.view[1].gx) / 2, (s.view[0].gy + s.view[1].gy) / 2);
-  } else if (play && s.phase === 'resolve') {
-    phase = s.banner || 'RESOLVE';
+  } else if (s.phase === 'resolve') {
+    phase = s.banner;
   }
-  setT(ui.phase, phase);
+  setT(ui.phase, play ? phase : '');
   setT(ui.hint, hint);
 
-  ui.opts.forEach((t, k) => {
-    const o = opts[k];
-    t.setVisible(!!o);
-    if (!o) return;
-    const x = Math.min(anchor.x + 34, W - 150);
-    const y = anchor.y - 72 + k * 24;
-    drawLabelSlab(g, x, y - 10, 104, 20, optColor, false);
-    setT(t, o[0] + ' ' + o[1]);
-    t.setPosition(x + 12, y);
+  // Menu slabs (two columns around P1) or clash slabs.
+  const items = [];
+  if (play && aiming && s.phase === 'choose') {
+    const p = toIso(s.view[0].gx, s.view[0].gy);
+    MENU.forEach((col, ci) => {
+      const x = Math.max(70, Math.min(W - 70, p.x + (ci ? 90 : -90)));
+      items.push({ x, y: p.y - 112, label: MENU_TITLES[ci], header: true });
+      col.forEach((act, ri) => {
+        const on = s.menuPos.col === ci && s.menuPos.row === ri;
+        items.push({ x, y: p.y - 86 + ri * 26, label: ACTIONS[act].name, on });
+      });
+    });
+  } else if (play && s.phase === 'clash') {
+    const p = toIso((s.view[0].gx + s.view[1].gx) / 2, (s.view[0].gy + s.view[1].gy) / 2);
+    CLASH_OPTS.forEach((label, k) => items.push({ x: Math.min(W - 70, p.x + 110), y: p.y - 90 + k * 28, label, clash: true }));
+  }
+  ui.menu.forEach((t, k) => {
+    const it = items[k];
+    t.setVisible(!!it);
+    if (!it) return;
+    if (!it.header) drawLabelSlab(g, it.x - 52, it.y - 10, 100, 20, it.clash ? COLORS.cpu : COLORS.p1, !!it.on);
+    t.setColor(it.on ? '#000000' : it.header ? hex(COLORS.p1) : '#ffffff');
+    t.setPosition(it.x, it.y);
+    setT(t, it.label);
   });
 
-  if (play && (s.phase === 'program' || s.phase === 'clash')) {
+  if (play && (s.phase === 'choose' || s.phase === 'aim' || s.phase === 'clash')) {
     const total = s.phase === 'clash' ? CLASH_MS : TURN_MS;
     const left = Math.max(0, s.deadline - time) / total;
     g.fillStyle(left < 0.25 ? COLORS.cpu : COLORS.p1, 0.9);
     g.fillRect(W / 2 - 150, H - 16, 300 * left, 4);
   }
 
-  // Overlays: attract title / game over.
-  const blink = Math.floor(time / 450) % 2 === 0;
+  // Overlays: attract title + how-to-play cards, or game over.
   let title = '';
   let sub = '';
   let titleColor = COLORS.p1;
+  const blinkOn = Math.floor(time / 450) % 2 === 0;
   if (!play) {
-    title = 'CATATUMBO PROTOCOL';
-    sub = blink ? 'PRESS START' : '';
+    const card = CARDS[Math.floor((time - s.attractStart) / CARD_MS) % CARDS.length];
+    title = card[0];
+    sub = card[1] + '\n\n' + (blinkOn ? 'PRESS START' : ' ');
   } else if (s.phase === 'over') {
     const o = s.state.over;
     title = o === 'p1' ? 'VICTORY' : o === 'cpu' ? 'DEFEATED' : 'DRAW';
     titleColor = o === 'p1' ? COLORS.p1 : o === 'cpu' ? COLORS.cpu : COLORS.bolt;
-    sub = time > s.phaseStart + ATTRACT_OVER_MS && blink ? 'PRESS START' : '';
+    sub = time > s.phaseStart + ATTRACT_OVER_MS && blinkOn ? 'PRESS START' : ' ';
   }
   if (title) {
-    drawLabelSlab(g, W / 2 - 200, 116, 400, 48, titleColor, true);
-    if (sub) drawLabelSlab(g, W / 2 - 90, 176, 180, 24, COLORS.white, false);
+    drawLabelSlab(g, W / 2 - 210, 116, 420, 46, titleColor, true);
+    const lines = sub.split('\n').length;
+    g.fillStyle(0x000000, 0.8);
+    g.fillRect(W / 2 - 200, 172, 400, lines * 16 + 12);
+    ui.sub.setY(178 + (lines * 16) / 2);
   }
   setT(ui.title, title);
-  setT(ui.sub, sub);
+  setT(ui.sub, title ? sub : '');
 }
