@@ -17,13 +17,13 @@ const COLORS = {
 };
 
 // Iso tile size (px) and vertical extrusions.
-const TW = 44;
-const TH = 22;
-const SLAB_H = 14;
-const HUT_STILT = 7;
-const HUT_H = 8;
-const TOWER_H = 64;
-const DECK_H = 8;
+const TW = 70;
+const TH = 35;
+const SLAB_H = 22;
+const HUT_STILT = 10;
+const HUT_H = 12;
+const TOWER_H = 90;
+const DECK_H = 12;
 
 // Grid directions. Stick → grid is a fixed 45° rotation (SPEC.md §1.1).
 const DIRS = {
@@ -737,12 +737,39 @@ function cpuClashPick(lastFoePick, guts = 0, rnd = Math.random) {
 
 // Projection puts north (the strait) at the top-left and the lake body toward the viewer:
 // +x (east) → screen up-right, +y (south) → screen down-right.
-const ISO_OX = W / 2 - ((COLS + ROWS - 2) * TW) / 4;
-const ISO_OY = H / 2 - ((ROWS - COLS) * TH) / 4 + 8;
+// Camera follows the midpoint of the two mechas; base offset centers the full map at rest.
 
-// Grid cell → screen centre of its rhombus.
+const CAM_SPRING = 0.08; // lerp factor per frame for camera smoothing
+
+function computeCam(s, time) {
+  const mx = (s.units ? s.state.units[0].x + s.state.units[1].x : 14) / 2;
+  const my = (s.units ? s.state.units[0].y + s.state.units[1].y : 20) / 2;
+  const ox = W / 2 - ((mx + my) * TW) / 2;
+  const oy = H / 2 - ((my - mx) * TH) / 2 + 24;
+  if (!s._camX) { s._camX = ox; s._camY = oy; }
+  s._camX += (ox - s._camX) * CAM_SPRING;
+  s._camY += (oy - s._camY) * CAM_SPRING;
+  return { x: s._camX, y: s._camY };
+}
+
+// Grid cell → screen centre of its rhombus. Camera offset set by drawWorld each frame.
+let CAM = null;
+
 function toIso(x, y) {
-  return { x: ISO_OX + ((x + y) * TW) / 2, y: ISO_OY + ((y - x) * TH) / 2 };
+  if (!CAM) return { x: 0, y: 0 };
+  return { x: CAM.x + ((x + y) * TW) / 2, y: CAM.y + ((y - x) * TH) / 2 };
+}
+
+// Camera spring: follows the midpoint between the two mechas.
+function computeCam(s, time) {
+  const mx = (s.state.units[0].x + s.state.units[1].x) / 2;
+  const my = (s.state.units[0].y + s.state.units[1].y) / 2;
+  const targetX = W / 2 - ((mx + my) * TW) / 2;
+  const targetY = H / 2 - ((my - mx) * TH) / 2 + 24;
+  if (!s._camX) { s._camX = targetX; s._camY = targetY; }
+  s._camX += (targetX - s._camX) * CAM_SPRING;
+  s._camY += (targetY - s._camY) * CAM_SPRING;
+  return { x: s._camX, y: s._camY };
 }
 
 // Vertices in order: top, right, bottom, left.
@@ -962,6 +989,11 @@ function drawMecha(g, gx, gy, facing, color, alpha, flash, stance) {
   const fx = v.x / n;
   const fy = v.y / n;
   const col = flash > 0 ? COLORS.white : color;
+
+  // Drop shadow: dark rhombus under the mecha.
+  const sh = rhombus(c.x, c.y, TW * 0.35, TH * 0.4);
+  g.fillStyle(0x000000, 0.35 * alpha);
+  g.fillPoints(sh, true);
 
   // Posture transforms.
   const s = stance || ST_NORMAL;
@@ -1635,6 +1667,8 @@ async function playEvents(s, events, token) {
 // --- Drawing ---
 
 function drawWorld(s, time, delta) {
+  // Update camera before any draw calls.
+  CAM = computeCam(s, time);
   const g = s.gFx;
   g.clear();
   const flicker = Math.random() < 0.06 ? 0.35 : 0.08 + 0.05 * Math.sin(time / 300);
@@ -1740,6 +1774,9 @@ function drawWorld(s, time, delta) {
 const CLASH_OPTS = ['B1 THRUST', 'B2 PARRY', 'B3 FEINT'];
 
 function drawHud(s, time) {
+  // Sync camera for HUD positioning (tags, menu float over mechas).
+  if (!s._camX) computeCam(s, time);
+  if (CAM) { const tmp = computeCam(s, time); CAM = tmp; }
   const g = s.gUi;
   const ui = s.ui;
   g.clear();
@@ -1747,6 +1784,7 @@ function drawHud(s, time) {
   const play = s.mode === 'play';
 
   // Corner panels: name + HP, segmented HP, energy pips, status.
+  const panelAlpha = s.phase === 'resolve' ? 0.35 : 1;
   [0, 1].forEach((i) => {
     const color = unitColor(i);
     const x0 = i ? W - 262 : 12;
@@ -1755,23 +1793,23 @@ function drawHud(s, time) {
     for (let k = 0; k < 10; k++) {
       const on = s.dispHp[i] > k * (HP_MAX / 10);
       const sx = i ? W - 50 - k * 20 : 30 + k * 20;
-      g.fillStyle(color, on ? 1 : 0.15);
+      g.fillStyle(color, (on ? 1 : 0.15) * panelAlpha);
       g.fillRect(sx, 37, 16, 8);
     }
     for (let k = 0; k < GUTS_MAX; k++) {
       const px = i ? W - 38 - k * 16 : 38 + k * 16;
-      g.fillStyle(COLORS.bolt, u.guts > k ? 1 : 0.15);
+      g.fillStyle(COLORS.bolt, (u.guts > k ? 1 : 0.15) * panelAlpha);
       g.fillPoints(rhombus(px, 58, 6, 6), true);
     }
     setT(ui.names[i], (i ? 'CPU' : 'P1') + '  HP ' + Math.max(0, s.dispHp[i]));
     const stLabel = ['', 'STAGGERED', 'KNOCKBACK', 'DOWN'][u.st] || '';
     const tags = [stLabel, u.momentum && 'MOMENTUM', u.guts >= GUTS_MAX && 'BURST READY'];
-    setT(ui.status[i], (stLabel ? 'GUTS  ' : '') + tags.filter(Boolean).join('  '));
+    setT(ui.status[i], (stLabel ? 'GUTS  ' : 'GUTS ') + tags.filter(Boolean).join('  '));
   });
 
   // Info panel (top centre): what the highlighted action does.
   let info = ['', '', ''];
-  const aiming = play && (s.phase === 'choose' || s.phase === 'aim') && !units[0].stunned;
+  const aiming = play && (s.phase === 'choose' || s.phase === 'aim') && units[0].st === ST_NORMAL;
   if (aiming) {
     const a = ACTIONS[s.sel.act];
     const plan = selPlan(s) || { act: s.sel.act, dir: units[0].facing };
