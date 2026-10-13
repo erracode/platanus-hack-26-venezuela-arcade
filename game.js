@@ -57,7 +57,11 @@ const GRAB_DMG = 10;
 const THROW_DMG = 15;
 const SLAM_DMG = 10; // extra when the throw hits land / the edge
 const THROW_DIST = 2;
-const GUTS_MAX = 3; // full guts unlock BURST in a clash
+const GUTS_MAX = 80; // melee damage fills it; a full meter refreshes the BURST charge
+const GUTS_BONUS = 10; // parry, throw and oil
+const BURST_DMG = 15;
+const OD_TURNS = 5; // overdrive after a burst, counting the burst step itself
+const OD_SPD = 5; // overdrive strikes win trades instead of clashing
 // Speed = when an action starts (Mecha Simultactics Speed Guide). Higher lands first.
 const PIVOT_PENALTY = 60; // per 90° turn a strike/parry/grab needs first (180° = 2 pivots)
 const STAGGER_PENALTY = 10; // staggered units still act, just too slow to clash or trade
@@ -215,7 +219,7 @@ const ACTIONS = {
   lunge: { name: 'LUNGE', spd: 210, target: 'dir', strike: true, info: ['DASH 2 TILES + STAB: 18 DMG', 'X2 ON FLANK  NEEDS MOMENTUM'] },
   parry: { name: 'PARRY', spd: 215, target: 'dir', info: ['BLOCKS STRIKES FROM THE FRONT', 'WHIFF = OPEN NEXT TURN'] },
   grab: { name: 'GRAB', spd: 180, target: 'dir', info: ['CATCH + THROW: 25+ DMG', 'IGNORES PARRY  WHIFF = OPEN'] },
-  burst: { name: 'BURST', spd: 210, target: 'none', info: ['ESCAPE KNOCKBACK: RESET STANCE', 'CONSUMES ALL GUTS'] },
+  burst: { name: 'BURST', spd: 210, target: 'none', info: ['ESCAPE KNOCKBACK: PUSH + OVERDRIVE', '1 CHARGE // REFILLS ON FULL GUTS'] },
   wait: { name: 'WAIT', spd: 0, target: 'none', info: [] },
 };
 const MOVE_ACTS = ['move', 'dodge', 'pivot'];
@@ -228,7 +232,7 @@ const CLASH_WINS = { parry: ['thrust', 'burst'], thrust: ['feint'], feint: ['par
 
 function newUnit(start) {
   // open: whiffed a parry/grab and must skip the next turn.
-  return { x: start.x, y: start.y, facing: start.facing, hp: HP_MAX, guts: 0, momentum: false, st: ST_NORMAL, open: false };
+  return { x: start.x, y: start.y, facing: start.facing, hp: HP_MAX, guts: 0, bursts: 1, od: 0, momentum: false, st: ST_NORMAL, open: false };
 }
 
 function newState() {
@@ -273,8 +277,8 @@ function dirBetween(a, b) {
 }
 
 function canUse(u, act) {
-  if (act === 'lunge') return u.momentum;
-  if (act === 'burst') return u.st === ST_KNOCKBACK && u.guts >= GUTS_MAX;
+  if (act === 'lunge') return u.momentum || u.od > 0;
+  if (act === 'burst') return u.st === ST_KNOCKBACK && u.bursts > 0;
   return true;
 }
 
@@ -288,7 +292,7 @@ function speedOf(u, plan) {
   const a = ACTIONS[plan.act];
   const pivots = a.target !== 'dir' || plan.act === 'pivot' || plan.dir === u.facing ? 0 : plan.dir === OPPOSITE[u.facing] ? 2 : 1;
   const base = plan.act === 'move' ? MOVE_SPD[plan.path ? plan.path.length : 1] : a.spd;
-  return base - pivots * PIVOT_PENALTY - (u.st === ST_STAGGERED ? STAGGER_PENALTY : 0);
+  return base - pivots * PIVOT_PENALTY - (u.st === ST_STAGGERED ? STAGGER_PENALTY : 0) + (u.od ? OD_SPD : 0);
 }
 
 // Straight cardinal reach. MOVE (range 3) uses facing: forward 3, sides 2, back 1.
@@ -341,7 +345,14 @@ function previewPlan(u, plan, other) {
   return { x: u.x, y: u.y, facing: a.target === 'dir' ? plan.dir : u.facing };
 }
 
-const gainGuts = (u, n) => (u.guts = Math.min(GUTS_MAX, u.guts + n));
+// A full meter resets and refreshes the BURST charge; while a charge is held it waits at max.
+function gainGuts(u, n, events, who) {
+  u.guts = Math.min(GUTS_MAX, u.guts + n);
+  if (u.guts < GUTS_MAX || u.bursts) return;
+  u.guts = 0;
+  u.bursts = 1;
+  events.push({ t: 'refresh', who });
+}
 
 // Advance stance when hit: N→S→K→D. Parry also sets the attacker to STAGGERED.
 function advanceStance(u) {
@@ -386,7 +397,7 @@ function resolveZone(s, i, events, rnd = Math.random) {
     return;
   }
   if (zone === 'oil') {
-    gainGuts(u, 1);
+    gainGuts(u, GUTS_BONUS, events, i);
     events.push({ t: 'zone', who: i, zone: tag, dmg: 0, guts: true, color });
   }
 }
@@ -446,7 +457,7 @@ function resolveTurn(state, plans) {
   });
   const spd = p.map((plan, i) => (plan.act === 'wait' ? 0 : speedOf(U[i], plan)));
   const momentum = [false, false];
-  U.forEach((u, i) => p[i].act === 'lunge' && (u.momentum = false));
+  U.forEach((u, i) => p[i].act === 'lunge' && !u.od && (u.momentum = false));
   events.push({ t: 'order', acts: p.map((x) => x.act), spd });
 
   // Clash: both strike at each other (after their dashes) with speeds within the clash window.
@@ -485,6 +496,7 @@ function resolveTurn(state, plans) {
   let grab = null;
 
   const parried = [false, false];
+  const inv = [false, false]; // bursting units cannot be hit this step
   const hurt = [false, false];
   const strike = (i, dmg, flankMult, combo = true) => {
     const foe = U[1 - i];
@@ -493,11 +505,11 @@ function resolveTurn(state, plans) {
     const flank = relation !== 'front';
     const total = Math.round(dmg * (flank ? flankMult : 1));
     foe.hp = Math.max(0, foe.hp - total);
-    gainGuts(U[i], 1);
     const prevSt = foe.st;
     if (combo) advanceStance(foe);
     if (prevSt !== foe.st) events.push({ t: 'stance', who: 1 - i, st: foe.st });
     events.push({ t: 'hit', who: 1 - i, dmg: total, flank: flank && flankMult > 1, relation, prevSt, combo });
+    gainGuts(U[i], total, events, i);
     if (!done[1 - i] && !groups.find((g) => g.includes(i)).includes(1 - i) && p[1 - i].act !== 'wait' && !cancelled[1 - i]) {
       cancelled[1 - i] = true;
       events.push({ t: 'interrupt', who: 1 - i, act: p[1 - i].act });
@@ -561,9 +573,29 @@ function resolveTurn(state, plans) {
         events.push({ t: 'guard', who: i });
       }
       if (p[i].act === 'burst') {
-        U[i].guts = 0;
-        U[i].st = ST_NORMAL;
+        const me = U[i];
+        const foe = U[1 - i];
+        me.bursts = 0;
+        me.st = ST_NORMAL;
+        me.od = OD_TURNS;
+        inv[i] = true;
         events.push({ t: 'burst', who: i });
+        // Shockwave: an adjacent foe (diagonals too) is hurt, pushed away and loses its action.
+        if (Math.abs(foe.x - me.x) <= 1 && Math.abs(foe.y - me.y) <= 1) {
+          foe.hp = Math.max(0, foe.hp - BURST_DMG);
+          hurt[1 - i] = true;
+          events.push({ t: 'hit', who: 1 - i, dmg: BURST_DMG, combo: false });
+          const to = { x: foe.x + Math.sign(foe.x - me.x), y: foe.y + Math.sign(foe.y - me.y) };
+          if (isWalkable(to.x, to.y)) {
+            foe.x = to.x;
+            foe.y = to.y;
+            events.push({ t: 'knock', who: 1 - i, path: [to] });
+          }
+          if (!g.includes(1 - i) && !done[1 - i] && p[1 - i].act !== 'wait' && !cancelled[1 - i]) {
+            cancelled[1 - i] = true;
+            events.push({ t: 'interrupt', who: 1 - i, act: p[1 - i].act });
+          }
+        }
       }
     }
 
@@ -575,12 +607,12 @@ function resolveTurn(state, plans) {
       const tiles = p[i].act === 'vslash' ? vslashTiles(u) : p[i].act === 'hslash' ? hslashTiles(u) : [frontOf(u)];
       const f = tiles[0] || frontOf(u);
       events.push({ t: p[i].act, who: i, x: f.x, y: f.y, tiles });
-      if (!inTiles(foe, tiles)) {
+      if (!inTiles(foe, tiles) || inv[1 - i]) {
         events.push({ t: 'miss', who: i });
         continue;
       }
       if (guard[1 - i] && relativeSide(foe, u) === 'front') {
-        gainGuts(foe, 1);
+        gainGuts(foe, GUTS_BONUS, events, 1 - i);
         parried[1 - i] = true;
         advanceStance(u); // parried → staggered
         events.push({ t: 'stance', who: i, st: u.st });
@@ -614,7 +646,7 @@ function resolveTurn(state, plans) {
         if (p[i].act !== 'grab' || cancelled[i]) continue;
         const f = frontOf(U[i]);
         events.push({ t: 'grab', who: i, x: f.x, y: f.y });
-        if (!same(f, U[1 - i])) {
+        if (!same(f, U[1 - i]) || inv[1 - i]) {
           events.push({ t: 'miss', who: i });
           U[i].open = true;
           events.push({ t: 'open', who: i });
@@ -666,13 +698,13 @@ function resolveThrow(state, who, dir) {
   foe.hp = Math.max(0, foe.hp - dmg);
   const prevSt = foe.st;
   foe.st = ST_DOWN;
-  gainGuts(me, 1);
   const events = [
     { t: 'throw', who, dir },
     { t: 'knock', who: 1 - who, path },
     { t: 'stance', who: 1 - who, st: ST_DOWN },
     { t: 'hit', who: 1 - who, dmg, slam, prevSt },
   ];
+  gainGuts(me, GUTS_BONUS + dmg, events, who);
   finishTurn(s);
   return { state: s, events };
 }
@@ -680,7 +712,7 @@ function resolveThrow(state, who, dir) {
 function resolveClash(state, picks) {
   const s = cloneState(state);
   const events = [];
-  picks.forEach((pk, i) => pk === 'burst' && (s.units[i].guts = 0));
+  picks.forEach((pk, i) => pk === 'burst' && (s.units[i].bursts = 0));
   const [pa, pb] = picks;
   if (pa === pb) {
     events.push({ t: 'mirror', picks });
@@ -700,9 +732,9 @@ function resolveClash(state, picks) {
     const prevSt = loser.st;
     advanceStance(loser);
     if (prevSt !== loser.st) events.push({ t: 'stance', who: 1 - winner, st: loser.st });
-    gainGuts(w, 1);
     events.push({ t: 'clashWin', who: winner, picks });
     events.push({ t: 'hit', who: 1 - winner, dmg: SLASH_DMG });
+    gainGuts(w, SLASH_DMG, events, winner);
     if (picks[winner] === 'burst') {
       const to = step(loser, w.facing);
       if (isWalkable(to.x, to.y)) {
@@ -725,6 +757,7 @@ function checkOutcome(s) {
 
 function finishTurn(s) {
   checkOutcome(s);
+  s.units.forEach((u) => u.od && u.od--);
   s.turn++;
 }
 
@@ -735,7 +768,7 @@ function cpuPlan(s, i, rnd = Math.random) {
   const me = s.units[i];
   const foe = s.units[1 - i];
   // BURST escape when knocked back with a full bar.
-  if (me.st === ST_KNOCKBACK && me.guts >= GUTS_MAX && rnd() < 0.8) return { act: 'burst' };
+  if (canUse(me, 'burst') && rnd() < 0.8) return { act: 'burst' };
   if (!canAct(me)) return WAIT_PLAN;
   const r = rnd();
   const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
@@ -773,7 +806,7 @@ function cpuPlan(s, i, rnd = Math.random) {
 
   // Momentum: lunge if the foe is 2-3 tiles away in a straight line.
   const line = DIR_KEYS.find((k) => same(step(step(me, k), k), foe));
-  if (me.momentum) {
+  if (canUse(me, 'lunge')) {
     const lane = DIR_KEYS.find((k) => {
       const end = dashPath(me, k, LUNGE_DASH, foe);
       return same(step(end.length ? end[end.length - 1] : me, k), foe);
@@ -817,9 +850,9 @@ function cpuThrowDir(s, i, rnd = Math.random) {
   return pool[Math.floor(rnd() * pool.length)];
 }
 
-// Light weighting: often counter the opponent's last clash pick; burst when guts are full.
-function cpuClashPick(lastFoePick, guts = 0, rnd = Math.random) {
-  if (guts >= GUTS_MAX && rnd() < 0.4) return 'burst';
+// Light weighting: often counter the opponent's last clash pick; burst when a charge is left.
+function cpuClashPick(lastFoePick, canBurst, rnd = Math.random) {
+  if (canBurst && rnd() < 0.4) return 'burst';
   if (lastFoePick && rnd() < 0.5) return CLASH_PICKS.find((k) => k !== 'burst' && CLASH_WINS[k].includes(lastFoePick));
   return CLASH_PICKS[Math.floor(rnd() * 3)];
 }
@@ -1448,10 +1481,10 @@ new Phaser.Game(config);
 const hex = (n) => '#' + n.toString(16).padStart(6, '0');
 const MENU_TITLES = ['MOVEMENT', 'COMBAT'];
 
-// Dynamic menu: adds a BURST row to COMBAT when the unit is KNOCKBACK with full guts.
+// Dynamic menu: adds a BURST row to COMBAT when the unit is KNOCKBACK with a charge left.
 function buildMenu(u) {
   const combat = [...COMBAT_ACTS];
-  if (u.st === ST_KNOCKBACK && u.guts >= GUTS_MAX) combat.push('burst');
+  if (canUse(u, 'burst')) combat.push('burst');
   return [MOVE_ACTS, combat];
 }
 const CARDS = [
@@ -1701,7 +1734,7 @@ function handleInput(s, time) {
   }
   if (s.phase === 'clash') {
     const keys = ['P1_1', 'P1_2', 'P1_3'];
-    if (s.state.units[0].guts >= GUTS_MAX) keys.push('P1_4');
+    if (s.state.units[0].bursts) keys.push('P1_4');
     const i = keys.findIndex((k) => consumePressed(c, k));
     if (i >= 0) {
       s.sfx.blip();
@@ -1835,8 +1868,8 @@ function askThrow(s, who) {
 }
 
 function askClash(s) {
-  const cpu = cpuClashPick(s.lastP1Pick, s.state.units[1].guts);
-  if (s.mode !== 'play') return wait(s, 600).then(() => [cpuClashPick(null, s.state.units[0].guts), cpu]);
+  const cpu = cpuClashPick(s.lastP1Pick, s.state.units[1].bursts);
+  if (s.mode !== 'play') return wait(s, 600).then(() => [cpuClashPick(null, s.state.units[0].bursts), cpu]);
   s.phase = 'clash';
   s.phaseStart = s.time.now;
   s.deadline = s.time.now + CLASH_MS;
@@ -1990,7 +2023,7 @@ async function playEvents(s, events, token) {
       s.sfx.hit();
       await wait(s, HIT_PAUSE_MS);
     } else if (e.t === 'parry') {
-      floatText(s, u, 'PARRY! +1', C_coast, 17);
+      floatText(s, u, 'PARRY! +' + GUTS_BONUS, C_coast, 17);
       addFx(s, { kind: 'flash', dur: 120 });
       s.sfx.parry();
       await wait(s, HIT_PAUSE_MS);
@@ -2006,6 +2039,10 @@ async function playEvents(s, events, token) {
     } else if (e.t === 'throw') {
       floatText(s, u, 'THROW!', unitColor(e.who), 17);
       await wait(s, 200);
+    } else if (e.t === 'refresh') {
+      floatText(s, u, 'GUTS FULL! BURST READY', C_bolt, 14, 1300);
+      s.sfx.lock();
+      await wait(s, 300);
     } else if (e.t === 'open') {
       floatText(s, u, 'WHIFF! OPEN', C_cpu, 15, 1200);
       await wait(s, 350);
@@ -2025,7 +2062,7 @@ async function playEvents(s, events, token) {
       if (stLabel) floatText(s, u, stLabel, stColors[e.st] || C_white, 16);
       await wait(s, 250);
     } else if (e.t === 'zone') {
-      const zLabel = e.zone + (e.dmg ? ' -' + e.dmg : '') + (e.guts ? ' +1 GUTS' : '') + (e.push ? ' SLIP!' : '') + (e.st ? ' ' + ST_NAME[e.st] : '');
+      const zLabel = e.zone + (e.dmg ? ' -' + e.dmg : '') + (e.guts ? ' +' + GUTS_BONUS + ' GUTS' : '') + (e.push ? ' SLIP!' : '') + (e.st ? ' ' + ST_NAME[e.st] : '');
       if (e.zone === 'CAT') {
         const strike = toIso(u.gx, u.gy);
         addFx(s, { kind: 'bolt', pts: makeBoltPoints(strike.x, strike.y - 22), dur: 500 });
@@ -2211,18 +2248,18 @@ function drawHud(s, time) {
     else g.fillRect(bx, 35, bw * hp, 9);
     g.lineStyle(1, C_ink, 0.9);
     for (let k = 1; k < 10; k++) g.lineBetween(bx + (bw * k) / 10, 35, bx + (bw * k) / 10, 44);
-    for (let k = 0; k < GUTS_MAX; k++) {
-      const px = i ? x0 + 202 - k * 14 : x0 + 18 + k * 14;
-      g.fillStyle(C_bolt, u.guts > k ? 1 : 0.16);
-      g.fillPoints(rhombus(px, 56, 5, 5), true);
-      g.lineStyle(1, C_bolt, 0.55);
-      g.strokePoints(rhombus(px, 56, 5, 5), true);
-    }
+    // GUTS meter, filling toward the centre like the HP rail.
+    const gx = i ? x0 + 150 : x0 + 12;
+    const gw = (60 * u.guts) / GUTS_MAX;
+    g.fillStyle(0x02070c, 1);
+    g.fillRect(gx, 52, 60, 7);
+    g.fillStyle(C_bolt, 1);
+    g.fillRect(i ? gx + 60 - gw : gx, 53, gw, 5);
     ui.names[i].setPosition(i ? W - 28 : 28, 21);
     ui.status[i].setPosition(i ? W - 84 : 84, 57);
     setT(ui.names[i], (i ? 'CPU CABIMAS' : 'P1 MARACAIBO') + ' // HP ' + Math.max(0, s.dispHp[i]));
     const stLabel = ST_NAME[u.st] || '';
-    setT(ui.status[i], [stLabel, u.open && 'OPEN', u.momentum && 'MOMENTUM', u.guts >= GUTS_MAX && 'BURST READY'].filter(Boolean).join(' // '));
+    setT(ui.status[i], [stLabel, u.open && 'OPEN', u.od && 'OVERDRIVE ' + u.od, u.momentum && 'MOMENTUM', canUse(u, 'burst') && 'BURST READY'].filter(Boolean).join(' // '));
   });
 
   // Reserved top-centre action telemetry, clear of both HP panels.
@@ -2235,7 +2272,7 @@ function drawHud(s, time) {
     const available = (canAct(me) || s.sel.act === 'burst') && canUse(me, s.sel.act);
     info = available
       ? [a.name + '  //  SPD ' + speedOf(me, plan), a.info[0], a.info[1]]
-      : [a.name + '  //  LOCKED', canAct(me) ? 'NEEDS MOMENTUM' : 'ONLY BURST BREAKS KNOCKBACK', canAct(me) ? 'MOVE FORWARD 3 TILES THE TURN BEFORE' : 'FULL GUTS REQUIRED'];
+      : [a.name + '  //  LOCKED', canAct(me) ? 'NEEDS MOMENTUM' : 'ONLY BURST BREAKS KNOCKBACK', canAct(me) ? 'MOVE FORWARD 3 TILES THE TURN BEFORE' : 'NO CHARGE: FILL GUTS TO REFRESH'];
     drawLabelSlab(g, 244, 9, 312, 56, C_p1, false);
   }
   info.forEach((t, k) => setT(ui.info[k], t));
@@ -2291,7 +2328,7 @@ function drawHud(s, time) {
     arc(cx, cy, 62, -2.8, 0.35, C_cpu, 4, 1);
     arc(cx, cy, 79, -0.15, 2.65, C_cpu, 3, 0.65);
     drawShards(g, cx, cy, C_cpu, 0.9);
-    const opts = units[0].guts >= GUTS_MAX ? ['THRUST', 'PARRY', 'FEINT', 'BURST'] : ['THRUST', 'PARRY', 'FEINT'];
+    const opts = units[0].bursts ? ['THRUST', 'PARRY', 'FEINT', 'BURST'] : ['THRUST', 'PARRY', 'FEINT'];
     const side = cx < 530 ? 1 : -1;
     const cardX = side > 0 ? Math.min(W - 174, cx + 88) : Math.max(14, cx - 262);
     const cardY = Math.max(100, Math.min(H - 170 - opts.length * 43, cy - 83));
