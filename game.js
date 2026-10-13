@@ -66,7 +66,7 @@ const GRAB_DMG = 10;
 const THROW_DMG = 15;
 const SLAM_DMG = 10; // extra when the throw hits land / the edge
 const THROW_DIST = 6; // flying knockback
-const CRASH_DMG = 15; // thrown into a palafito or the bridge: it breaks
+const CRASH_DMG = 8; // thrown into a palafito or the bridge: it breaks
 const OIL_DMG = 10; // thrown over oil: it explodes and is consumed
 const GUTS_MAX = 80; // melee damage fills it; a full meter refreshes the BURST charge
 const GUTS_BONUS = 10; // parry, throw and oil
@@ -113,8 +113,8 @@ const LAKE_HALF = [4, 4, 3, 2, 1, 2, 8, 8, 7, 7, 8, 8, 9, 9, 9, 9, 8, 8, 7, 7, 6
 const LAGO_MAP = Array.from({ length: 26 }, (_, y) => Array.from({ length: 26 }, (_, x) => (M_abs(x - 12) <= LAKE_HALF[y] ? 0 : 1)));
 for (const [t, ...p] of [
   [2, 10, 4, 11, 4, 12, 4, 13, 4, 14, 4],
-  [3, 18, 9, 19, 9, 20, 12, 21, 12, 20, 15, 21, 15],
-  [4, 3, 15, 4, 16, 5, 17],
+  [3, 5, 6, 19, 16, 20, 17],
+  [4, 3, 14, 4, 14, 3, 15, 4, 15, 5, 15, 4, 16, 5, 16, 6, 16, 4, 17, 5, 17],
   [5, 1, 10],
   [6, 4, 6, 9, 8, 16, 11, 8, 18],
   [7, 4, 13, 13, 10, 10, 16, 14, 19],
@@ -241,7 +241,7 @@ const ACTIONS = {
   vslash: { name: 'V-SLASH', spd: 150, target: 'dir', strike: true, info: ['3 CASILLAS AL FRENTE: 22 DMG', 'X2 DE FLANCO'] },
   hslash: { name: 'H-SLASH', spd: 150, target: 'dir', strike: true, info: ['BARRIDO 3X2: 22 DMG', 'X2 DE FLANCO  ALCANZA DIAGONALES'] },
   jab: { name: 'JAB', spd: 176, target: 'dir', strike: true, info: ['GOLPE RAPIDO: 8 DMG', 'SIN COMBO  CORTA LO MAS LENTO'] },
-  lunge: { name: 'EMBESTIDA', spd: 210, target: 'dir', strike: true, info: ['AVANZA 3 Y GOLPEA TODO: 18 DMG', 'X2 DE FLANCO  REQUIERE IMPULSO'] },
+  lunge: { name: 'EMBESTIDA', spd: 210, target: 'dir', strike: true, info: ['AVANZA 2, GOLPEA 3 CASILLAS: 18', 'X2 DE FLANCO  REQUIERE IMPULSO'] },
   block: { name: 'ESCUDO', spd: 215, target: 'dir', info: ['BLOQUEA TODO LO FRONTAL', 'TE EMPUJA 1 ATRAS  SIN CASTIGO'] },
   vent: { name: 'VENT', spd: 165, target: 'none', info: ['GUTS A VIDA (4:1)', 'EMPUJA AL RIVAL CERCANO'] },
   parry: { name: 'PARRY', spd: 215, target: 'dir', info: ['DESVIA ATAQUES FRONTALES', 'SI FALLA: EXPUESTO 1 TURNO'] },
@@ -669,7 +669,8 @@ const resolveTurn = (state, plans) => {
         events.push({ t: 'vent', who: i, heal });
       }
       // Shockwave (BURST hurts, VENT only shoves): an adjacent foe is pushed away and loses its action.
-      if ((p[i].act === 'burst' || p[i].act === 'vent') && M_abs(foe.x - me.x) <= 1 && M_abs(foe.y - me.y) <= 1) {
+      const reachS = p[i].act === 'vent' ? 2 : p[i].act === 'burst' ? 1 : 0;
+      if (M_abs(foe.x - me.x) <= reachS && M_abs(foe.y - me.y) <= reachS) {
         if (p[i].act === 'burst') {
           foe.hp = M_max(0, foe.hp - BURST_DMG);
           hurt[1 - i] = true;
@@ -693,7 +694,7 @@ const resolveTurn = (state, plans) => {
       if (!ACTIONS[p[i].act].strike) continue;
       const u = U[i];
       const foe = U[1 - i];
-      const tiles = p[i].act === 'vslash' ? vslashTiles(u) : p[i].act === 'hslash' ? hslashTiles(u) : [frontOf(u)];
+      const tiles = p[i].act === 'vslash' ? vslashTiles(u) : p[i].act === 'hslash' ? hslashTiles(u) : p[i].act === 'lunge' ? vslashTiles({ ...start[i], fc: p[i].dir }) : [frontOf(u)];
       const f = tiles[0] || frontOf(u);
       events.push({ t: p[i].act, who: i, x: f.x, y: f.y, tiles });
       if (!inTiles(foe, tiles) || inv[1 - i]) {
@@ -830,7 +831,7 @@ const resolveThrow = (state, who, dir) => {
   const s = cloneState(state);
   const me = s.us[who];
   const foe = s.us[1 - who];
-  const f = flightOf(foe, dir, me, 1 - who);
+  const f = flightOf(me, dir, {}, 1 - who);
   f.breaks.forEach((b) => (LAGO_MAP[b.y][b.x] = 0));
   const last = f.wp[f.wp.length - 1] || foe;
   foe.x = last.x;
@@ -842,6 +843,8 @@ const resolveThrow = (state, who, dir) => {
   const extra = f.events.reduce((n, e) => n + (e.dmg || 0), 0);
   const events = [
     { t: 'throw', who, dir },
+    // The foe is swung through the thrower's tile, then flies from there.
+    { t: 'knock', who: 1 - who, wp: [{ x: me.x, y: me.y }], fly: true },
     ...f.events,
     { t: 'stance', who: 1 - who, st: ST_DOWN },
     { t: 'hit', who: 1 - who, dmg: f.dmg - extra, slam: f.slam, prevSt },
@@ -992,12 +995,10 @@ const cpuPlan = (s, i, rnd = M_random) => {
 
 // Throw where the flight hurts most (crashes, lightning, oil), random among ties.
 const cpuThrowDir = (s, i, rnd = M_random) => {
-  const foe = s.us[1 - i];
   const me = s.us[i];
-  const open = DIR_KEYS.filter((k) => !same(step(foe, k), me));
-  const dmg = (k) => flightOf(foe, k, me, 1 - i).dmg;
-  const best = M_max(...open.map(dmg));
-  const pool = open.filter((k) => dmg(k) === best);
+  const dmg = (k) => flightOf(me, k, {}, 1 - i).dmg;
+  const best = M_max(...DIR_KEYS.map(dmg));
+  const pool = DIR_KEYS.filter((k) => dmg(k) === best);
   return pool[M_floor(rnd() * pool.length)];
 };
 
@@ -1193,8 +1194,8 @@ const drawBridge = (g) => {
     g.lB(t.x - 8, deckY, t.x, topY);
     g.lB(t.x + 8, deckY, t.x, topY);
     g.lS(1.4, 0xf7f2db, 0.92);
-    for (let k = 1; k <= 3; k++) {
-      const off = (k * TW) / 4;
+    for (let k = 1; k <= 2; k++) {
+      const off = (k * TW) / 3;
       g.lB(t.x, topY + 3, t.x - off, deckY + off / 2);
       g.lB(t.x, topY + 3, t.x + off, deckY - off / 2);
     }
@@ -1902,7 +1903,7 @@ const handleInput = (s, time) => {
   }
   if (s.ph === 'throw') {
     for (const [stick, dir] of Object.entries(STICK_TO_DIR)) {
-      if (consumePressed(c, 'P1_' + stick) && !same(step(s.state.us[1], dir), s.state.us[0])) {
+      if (consumePressed(c, 'P1_' + stick)) {
         s.thD = dir;
         s.sfx.tick();
       }
@@ -2034,8 +2035,7 @@ const lockTurn = async (s) => {
 
 const askThrow = (s, who) => {
   if (s.mode !== 'play' || who !== 0) return wait(s, 400).then(() => cpuThrowDir(s.state, who));
-  const foe = s.state.us[1];
-  s.thD = DIR_KEYS.find((k) => !same(step(foe, k), s.state.us[0]));
+  s.thD = s.state.us[0].fc;
   s.ph = 'throw';
   s.dl = s.time.now + CLASH_MS;
   clearPressed(s.controls);
@@ -2378,16 +2378,12 @@ const drawWorld = (s, time, delta) => {
         const p = toIso(n.x, n.y);
         drawArrow(g, p.x, p.y, stick, dir === sel.dir ? C_white : 0x5a6070);
       }
-      if (sel.act === 'lunge') {
-        const wp = dashPath(me, sel.dir, LUNGE_DASH, s.state.us[1]);
-        wp.forEach((c) => drawCell(g, c.x, c.y, C_bolt, 0.1, 0.5));
-      }
       if (sel.act !== 'pivot') {
         const end = previewPlan(me, { act: sel.act, dir: sel.dir }, s.state.us[1]);
         const col = ACTIONS[sel.act].strike ? C_cpu : C_white;
         const atkTiles =
-          sel.act === 'vslash'
-            ? vslashTiles({ x: end.x, y: end.y, fc: sel.dir })
+          sel.act === 'vslash' || sel.act === 'lunge'
+            ? vslashTiles(sel.act === 'lunge' ? { x: me.x, y: me.y, fc: sel.dir } : { x: end.x, y: end.y, fc: sel.dir })
             : sel.act === 'hslash'
             ? hslashTiles({ x: end.x, y: end.y, fc: sel.dir })
             : [step(end, sel.dir)];
@@ -2400,14 +2396,11 @@ const drawWorld = (s, time, delta) => {
     }
   }
   if (play && s.ph === 'throw') {
-    const foe = s.state.us[1];
     for (const [stick, dir] of Object.entries(STICK_TO_DIR)) {
-      const n = step(foe, dir);
-      if (same(n, me)) continue;
-      const p = toIso(n.x, n.y);
+      const p = toIso(me.x + DIRS[dir].dx, me.y + DIRS[dir].dy);
       drawArrow(g, p.x, p.y, stick, dir === s.thD ? C_white : 0x5a6070);
     }
-    const f = flightOf(foe, s.thD, me, 1);
+    const f = flightOf(me, s.thD, {}, 1);
     f.wp.forEach((c, k) => drawCell(g, c.x, c.y, k === f.wp.length - 1 && f.breaks.length ? C_cpu : C_bolt, 0.15 + 0.15 * blink, 0.8));
   }
 
@@ -2435,14 +2428,6 @@ const drawWorld = (s, time, delta) => {
 
   const gt = s.gTop;
   gt.clear();
-  if (play) {
-    const p = toIso(s.vw[1].gx, s.vw[1].gy);
-    const r = 27 + blink * 3;
-    gt.lS(2, C_cpu, 0.4 + blink * 0.5);
-    gt.strokeCircle(p.x, p.y - 30, r);
-    gt.lB(p.x - r - 7, p.y - 30, p.x - r + 5, p.y - 30);
-    gt.lB(p.x + r - 5, p.y - 30, p.x + r + 7, p.y - 30);
-  }
   s.fx = s.fx.filter((f) => f.until > time);
   for (const f of s.fx) {
     const a = M_min(1, (f.until - time) / M_min(f.dur, 400));
