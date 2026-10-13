@@ -97,7 +97,7 @@ const HIT_PAUSE_MS = 550;
 const CLASH_PAUSE_MS = 750;
 const STUN_SHOW_MS = 900;
 const ATTRACT_TURN_MS = 1200;
-const INTRO_MS = 2200; // "ENEMY IS APPROACHING" banner: input waits and the turn clock starts after it
+const INTRO_MS = 3200; // NEXT ENEMY briefing: input waits and the turn clock starts after it
 const CARD_MS = 3500; // attract-mode how-to-play card rotation
 const ATTRACT_OVER_MS = 2500;
 const OVER_IDLE_MS = 20000;
@@ -185,14 +185,19 @@ function normalizeIncomingKey(key) {
 const createControls = (scene) => {
   const controls = { held: Object.create(null), pressed: Object.create(null) };
 
-  const onKeyDown = (event) => {
+  // Single-player: the P2 stick also steers P1. The cabinet key table itself is untouched.
+  const codeOf = (event) => {
     const code = KEYBOARD_TO_ARCADE[normalizeIncomingKey(event.key)];
+    return code && code[1] === '2' && 'UDLR'.includes(code[3]) ? 'P1_' + code[3] : code;
+  };
+  const onKeyDown = (event) => {
+    const code = codeOf(event);
     if (!code) return;
     if (!controls.held[code]) controls.pressed[code] = true;
     controls.held[code] = true;
   };
   const onKeyUp = (event) => {
-    const code = KEYBOARD_TO_ARCADE[normalizeIncomingKey(event.key)];
+    const code = codeOf(event);
     if (code) controls.held[code] = false;
   };
 
@@ -204,6 +209,8 @@ const createControls = (scene) => {
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('blur', onBlur);
+  // Grab keyboard focus at boot: the dev dashboard only forwards keys typed inside the game frame.
+  window.focus();
   scene.events.once('shutdown', () => {
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
@@ -1319,7 +1326,7 @@ const mechTone = (c, k, flash) => {
 };
 
 // Tiny orthographic software renderer: transform, pose, back-face cull, light and painter-sort.
-const drawMecha = (g, gx, gy, fc, color, alpha, flash, stance, pose = 'idle', frame = 0) => {
+const drawMecha = (g, gx, gy, fc, color, alpha, flash, stance, pose = 'idle', frame = 0, wire = 0) => {
   const c = toIso(gx, gy), d = DIRS[fc], pal = MECH_PALS[color === C_cpu ? 1 : 0];
   const st = stance || 0, tilt = st === ST_STAGGERED ? -0.15 : st === ST_KNOCKBACK ? 0.17 : 0;
   const sn = M_sin(tilt), co = M_cos(tilt), down = st === ST_DOWN;
@@ -1381,8 +1388,8 @@ const drawMecha = (g, gx, gy, fc, color, alpha, flash, stance, pose = 'idle', fr
   }
   faces.sort((a, b) => a.d - b.d);
   for (const f of faces) {
-    g.fS(f.c, alpha); g.fP(f.p, true);
-    g.lS(1.35, C_ink, alpha * 0.9); g.sP(f.p, true);
+    g.fS(wire ? 0x041820 : f.c, alpha); g.fP(f.p, true);
+    g.lS(wire ? 0.6 : 1.35, wire ? C_p1 : C_ink, alpha * 0.9); g.sP(f.p, true);
   }
   const energy = flash ? C_white : pal[3];
   if (pose === 'move') for (const x of [-7, 7]) {
@@ -1628,6 +1635,7 @@ const CARDS = [
   ['CATATUMBO PROTOCOL', 'MECHA DUEL // LAKE MARACAIBO'],
   ['PROGRAM', 'PICK ONE ACTION\nSPEED RESOLVES FIRST'],
   ['SWORD CLASH', 'PARRY > THRUST > FEINT > PARRY'],
+  ['CONTROLS', 'STICK  MENU / AIM\nB1  CONFIRM     B2  BACK\nCLASH  B1 THRUST  B2 PARRY  B3 FEINT'],
 ];
 
 const txt = (scene, x, y, size, color, originX = 0) => {
@@ -1636,6 +1644,8 @@ const txt = (scene, x, y, size, color, originX = 0) => {
     .setOrigin(originX, 0.5)
     .setDepth(10);
 };
+
+const tint = (t, c) => t.kc !== c && t.setColor(hex((t.kc = c)));
 
 const setT = (t, s) => {
   if (t.text !== s) t.setText(s);
@@ -1660,6 +1670,11 @@ const createUi = (scene) => {
     cardT: txt(scene, 250, 340, 12, '#02140a', 0.5),
     card: txt(scene, W / 2, 410, 15, hex(C_grid), 0.5),
     press: txt(scene, W / 2, 520, 30, hex(C_gold), 0.5).setFontStyle('bold italic'),
+    // NEXT ENEMY briefing column: code, weapons, arena, mission.
+    ne: [txt(scene, 560, 150, 20, hex(C_grid), 0.5), txt(scene, 560, 290, 17, hex(C_grid), 0.5), txt(scene, 560, 400, 17, hex(C_gold), 0.5), txt(scene, 560, 470, 26, hex(C_grid), 0.5).setFontStyle('bold italic').setPadding(24, 0)],
+    // Big italic turn clock, seconds plus small hundredths (Virtual-On style).
+    tm: txt(scene, 690, 555, 40, hex(C_grid), 1).setFontStyle('bold italic').setPadding(16, 0),
+    tc: txt(scene, 676, 545, 17, hex(C_grid), 0).setFontStyle('bold italic'),
   };
 };
 
@@ -1670,7 +1685,7 @@ const setupCameras = (s) => {
   if (!s.cameras.add) return;
   main.setBounds(0, 0, WORLD_W, WORLD_H).setDeadzone(64, 44).startFollow(s.camFocus, false, 0.09, 0.09);
   const fixed = Object.values(s.ui).flat().filter((o) => !s.ui.tags.includes(o));
-  main.ignore([s.gUi, ...fixed]);
+  main.ignore([s.gUi, s.gWire, ...fixed]);
   s.hudCam.ignore([s.gBg, s.gMap, s.gFx, s.gUnits, s.gTop, ...s.ui.tags]);
 };
 
@@ -1709,6 +1724,7 @@ function create() {
   this.gUnits = this.add.graphics();
   this.gTop = this.add.graphics();
   this.gUi = this.add.graphics();
+  this.gWire = this.add.graphics().setScale(3.2).setDepth(9);
   this.ui = createUi(this);
   setupCameras(this);
   this.oTi = [];
@@ -2461,7 +2477,7 @@ const drawHud = (s, time) => {
 
   // Compact opposing pilot panels with one thick, legible HP rail.
   [0, 1].forEach((i) => {
-    if (!play) {
+    if (!play || time - s.matchStart < INTRO_MS) {
       setT(ui.names[i], '');
       setT(ui.status[i], '');
       return;
@@ -2606,9 +2622,15 @@ const drawHud = (s, time) => {
     g.lS(2, s.ph === 'clash' ? C_cpu : C_p1, 0.75);
     g.lB(145, 530, 655, 530);
   }
-  if (play && ['choose', 'aim', 'clash', 'throw'].includes(s.ph)) {
+  let clock = '';
+  let cs = '';
+  if (play && !intro && ['choose', 'aim', 'clash', 'throw'].includes(s.ph)) {
     const total = s.ph === 'clash' || s.ph === 'throw' ? CLASH_MS : TURN_MS;
-    const left = M_max(0, s.dl - time) / total;
+    const ms = M_min(total, M_max(0, s.dl - time));
+    const left = ms / total;
+    clock = '' + M_floor(ms / 1000);
+    cs = ('0' + M_floor((ms % 1000) / 10)).slice(-2);
+    [ui.tm, ui.tc].forEach((t) => tint(t, left > 0.5 ? C_grid : left > 0.25 ? C_gold : C_cpu));
     const barW = 430;
     const barX = W / 2 - barW / 2;
     const barColor = left > 0.5 ? C_p1 : left > 0.25 ? C_bolt : C_cpu;
@@ -2617,6 +2639,8 @@ const drawHud = (s, time) => {
     g.fS(barColor, 1);
     g.fR(barX, H - 11, barW * left, 5);
   }
+  setT(ui.tm, clock);
+  setT(ui.tc, cs);
 
   // Attract/game-over title treatment: one decisive plate, no generic modal stack.
   let title = '';
@@ -2626,6 +2650,8 @@ const drawHud = (s, time) => {
   let big = '';
   let big2 = '';
   let card = ['', ''];
+  let ne = ['', '', '', ''];
+  s.gWire.clear();
   if (!play) {
     // Title screen: the demo duel runs dimmed behind a CRT grid (M.S.B.S. / VS screen homage).
     g.fS(0x010806, 0.62);
@@ -2646,18 +2672,31 @@ const drawHud = (s, time) => {
     card = cards[M_floor((time - s.attractStart) / CARD_MS) % cards.length];
     big = 'CATATUMBO';
     big2 = 'PROTOCOL';
-    ui.big.setY(122).setColor(hex(C_gold)).setScale(1);
-    ui.big2.setY(184);
+    tint(ui.big, C_gold);
+    ui.big.setY(122).setScale(1);
+    ui.big2.setPosition(W / 2, 184);
   } else if (intro) {
-    // Stage intro banner.
-    g.fS(0x0a0204, 0.85);
-    g.fR(0, 220, W, 130);
-    g.lS(4, C_cpu, 1);
-    g.strokeRect(40, 232, W - 80, 106);
-    big = 'ENEMY IS APPROACHING';
-    big2 = 'STAGE ' + s.stage + '  //  CPU LV' + s.stage;
-    ui.big.setY(270).setColor(hex(C_cpu)).setScale(0.66);
-    ui.big2.setY(315);
+    // NEXT ENEMY briefing: CRT grid, spinning wireframe of the rival, its spec sheet and the arena.
+    g.fS(0x01060a, 0.97);
+    g.fR(0, 0, W, H);
+    g.lS(1, C_p1, 0.12);
+    for (let k = 0; k <= 25; k++) {
+      g.lB(k * 32, 0, k * 32, H);
+      g.lB(0, k * 32, W, k * 32);
+    }
+    g.fS(C_cpu, 1);
+    g.fillTriangle(150, 38, 150, 66, 166, 52);
+    g.fillTriangle(650, 38, 650, 66, 634, 52);
+    const c = toIso(0, 0);
+    s.gWire.setPosition(200 - c.x * 3.2, 515 - c.y * 3.2);
+    drawMecha(s.gWire, 0, 0, DIR_KEYS[M_floor(time / 450) % 4], C_cpu, 1, 0, 0, 'idle', 0, 1);
+    const n = s.stage;
+    big = 'NEXT ENEMY';
+    big2 = 'VR.CABIMAS';
+    tint(ui.big, C_cpu);
+    ui.big.setY(52).setScale(0.8);
+    ui.big2.setPosition(560, 205);
+    ne = ['RVR-26-C  LV' + n, 'V-SLASH    H-SLASH\nJAB    LUNGE    GRAB', '- LAKE MARACAIBO -', n + ([, 'st', 'nd', 'rd'][n] || 'th') + '. MISSION'];
   } else if (s.ph === 'over') {
     const o = s.state.over;
     title = o === 'p1' ? 'STAGE ' + s.stage + ' CLEAR' : o === 'cpu' ? 'DEFEATED' : 'DRAW';
@@ -2683,6 +2722,7 @@ const drawHud = (s, time) => {
   setT(ui.big2, big2);
   setT(ui.tag, play ? '' : 'M.S.B.S. VER 26  //  MECHA SIMULTACTICS');
   ['P1 MARACAIBO', 'VS', 'CPU CABIMAS'].forEach((t, k) => setT(ui.vs[k], play ? '' : t));
+  ne.forEach((t, k) => setT(ui.ne[k], t));
   setT(ui.cardT, card[0]);
   setT(ui.card, card[1]);
   setT(ui.press, !play && blinkOn ? 'PRESS START' : '');
