@@ -59,7 +59,6 @@ const SLASH_DMG = 22; // ~7 clean frontal hits to KO
 const LUNGE_DMG = 18;
 const JAB_DMG = 8; // quick poke: never advances stance
 const LUNGE_FLANK = 2; // lunge damage multiplier when hitting a side or the back
-const LUNGE_DASH = 2;
 const TP_RANGE = 5; // teleport reach (Manhattan tiles)
 const BLOCK_MAX = 5; // shield durability; refills with a full GUTS meter
 const GRAB_DMG = 10;
@@ -241,7 +240,7 @@ const ACTIONS = {
   vslash: { name: 'V-SLASH', spd: 150, target: 'dir', strike: true, info: ['3 CASILLAS AL FRENTE: 22 DMG', 'X2 DE FLANCO'] },
   hslash: { name: 'H-SLASH', spd: 150, target: 'dir', strike: true, info: ['BARRIDO 3X2: 22 DMG', 'X2 DE FLANCO  ALCANZA DIAGONALES'] },
   jab: { name: 'JAB', spd: 176, target: 'dir', strike: true, info: ['GOLPE RAPIDO: 8 DMG', 'SIN COMBO  CORTA LO MAS LENTO'] },
-  lunge: { name: 'EMBESTIDA', spd: 210, target: 'dir', strike: true, info: ['AVANZA 2, GOLPEA 3 CASILLAS: 18', 'X2 DE FLANCO  REQUIERE IMPULSO'] },
+  lunge: { name: 'EMBESTIDA', spd: 210, target: 'dir', strike: true, info: ['CRUZA 3 CASILLAS GOLPEANDO: 18', 'X2 DE FLANCO  REQUIERE IMPULSO'] },
   block: { name: 'ESCUDO', spd: 215, target: 'dir', info: ['BLOQUEA TODO LO FRONTAL', 'TE EMPUJA 1 ATRAS  SIN CASTIGO'] },
   vent: { name: 'VENT', spd: 165, target: 'none', info: ['GUTS A VIDA (4:1)', 'EMPUJA AL RIVAL CERCANO'] },
   parry: { name: 'PARRY', spd: 215, target: 'dir', info: ['DESVIA ATAQUES FRONTALES', 'SI FALLA: EXPUESTO 1 TURNO'] },
@@ -370,19 +369,6 @@ const faceTo = (a, b) => {
   return M_abs(dx) >= M_abs(dy) ? (dx > 0 ? 'E' : 'W') : dy > 0 ? 'S' : 'N';
 };
 
-// Straight dash of up to n tiles, stopping before land or the other unit.
-const dashPath = (from, dir, n, other) => {
-  const wp = [];
-  let c = from;
-  for (let k = 0; k < n; k++) {
-    const t = step(c, dir);
-    if (!isWalkable(t.x, t.y) || same(t, other)) break;
-    wp.push(t);
-    c = t;
-  }
-  return wp;
-};
-
 // Where a plan would leave a unit if nothing interfered (ghost preview).
 const previewPlan = (u, plan, other) => {
   const a = ACTIONS[plan.act];
@@ -392,7 +378,7 @@ const previewPlan = (u, plan, other) => {
     return { x: last.x, y: last.y, fc: plan.act === 'dodge' ? u.fc : plan.act === 'tele' ? faceTo(last, u) : dirBetween(prev, last) };
   }
   if (plan.act === 'lunge') {
-    const wp = dashPath(u, plan.dir, LUNGE_DASH, other);
+    const wp = lungePath(u, plan.dir, other);
     const end = wp.length ? wp[wp.length - 1] : u;
     return { x: end.x, y: end.y, fc: plan.dir };
   }
@@ -469,6 +455,13 @@ const vslashTiles = (u) => {
   return out;
 };
 
+// LUNGE charges the 3-tile lane straight through the foe; it can't end on the foe's tile.
+const lungePath = (u, dir, other) => {
+  const wp = vslashTiles({ x: u.x, y: u.y, fc: dir });
+  if (same(wp[wp.length - 1], other)) wp.pop();
+  return wp;
+};
+
 // H-SLASH: three independent lanes, each stopping at its first solid tile.
 const hslashTiles = (u) => {
   const d = DIRS[u.fc];
@@ -515,28 +508,18 @@ const resolveTurn = (state, plans) => {
   U.forEach((u, i) => p[i].act === 'lunge' && !u.od && (u.momentum = false));
   events.push({ t: 'order', acts: p.map((x) => x.act), spd });
 
-  // Clash: both strike at each other (after their dashes) with speeds within the clash window.
+  // Clash: equal-speed strikes that reach each other, decided before anyone moves.
   if (STRIKE_ACTS.includes(p[0].act) && STRIKE_ACTS.includes(p[1].act) && M_abs(spd[0] - spd[1]) <= CLASH_WINDOW) {
-    const end = U.map((u, i) => {
-      const wp = p[i].act === 'lunge' ? dashPath(u, p[i].dir, LUNGE_DASH, U[1 - i]) : [];
-      return { wp, at: wp.length ? wp[wp.length - 1] : u, fc: p[i].dir };
-    });
     const hitTiles = (i) => {
-      const src = end[i];
-      if (p[i].act === 'vslash') return vslashTiles({ x: src.at.x, y: src.at.y, fc: src.fc });
-      if (p[i].act === 'hslash') return hslashTiles({ x: src.at.x, y: src.at.y, fc: src.fc });
-      return [step(src.at, src.fc)];
+      const src = { x: U[i].x, y: U[i].y, fc: p[i].dir };
+      if (p[i].act === 'vslash' || p[i].act === 'lunge') return vslashTiles(src);
+      if (p[i].act === 'hslash') return hslashTiles(src);
+      return [step(src, src.fc)];
     };
-    if (!same(end[0].at, end[1].at) && inTiles(end[1].at, hitTiles(0)) && inTiles(end[0].at, hitTiles(1))) {
+    if (inTiles(U[1], hitTiles(0)) && inTiles(U[0], hitTiles(1))) {
       U.forEach((u, i) => {
-        u.fc = end[i].fc;
-        if (end[i].wp.length) {
-          u.x = end[i].at.x;
-          u.y = end[i].at.y;
-          events.push({ t: 'move', who: i, wp: end[i].wp, fc: u.fc, act: p[i].act });
-        } else {
-          events.push({ t: 'face', who: i, fc: u.fc });
-        }
+        u.fc = p[i].dir;
+        events.push({ t: 'face', who: i, fc: u.fc });
       });
       events.push({ t: 'clash' });
       U.forEach((u, i) => (u.momentum = momentum[i]));
@@ -555,10 +538,10 @@ const resolveTurn = (state, plans) => {
   let launched = -1;
   const inv = [false, false]; // bursting units cannot be hit this step
   const hurt = [false, false];
-  const strike = (i, dmg, flankMult, combo = true) => {
+  const strike = (i, dmg, flankMult, combo = true, from = U[i]) => {
     const foe = U[1 - i];
     hurt[1 - i] = true;
-    const relation = relativeSide(foe, U[i]);
+    const relation = relativeSide(foe, from);
     const flank = relation !== 'front';
     const total = M_round(dmg * (flank ? flankMult : 1));
     foe.hp = M_max(0, foe.hp - total);
@@ -571,7 +554,7 @@ const resolveTurn = (state, plans) => {
       // Teleported into an attack: launched along the attacker's facing like a throw (a grab just catches).
       blinked[1 - i] = false;
       launched = 1 - i;
-      const f = flightOf(foe, U[i].fc, U[i], 1 - i);
+      const f = flightOf(foe, faceTo(U[i], foe), U[i], 1 - i);
       f.breaks.forEach((b) => (LAGO_MAP[b.y][b.x] = 0));
       const last = f.wp[f.wp.length - 1] || foe;
       foe.x = last.x;
@@ -604,7 +587,7 @@ const resolveTurn = (state, plans) => {
     const walk = {};
     for (const i of acting) {
       const a = p[i].act;
-      if (a === 'lunge') walk[i] = dashPath(U[i], p[i].dir, LUNGE_DASH, U[1 - i]);
+      if (a === 'lunge') walk[i] = lungePath(U[i], p[i].dir, U[1 - i]);
       if (a === 'tele') {
         const t = (p[i].wp || [])[0];
         U[i].tp = 0;
@@ -696,12 +679,13 @@ const resolveTurn = (state, plans) => {
       const foe = U[1 - i];
       const tiles = p[i].act === 'vslash' ? vslashTiles(u) : p[i].act === 'hslash' ? hslashTiles(u) : p[i].act === 'lunge' ? vslashTiles({ ...start[i], fc: p[i].dir }) : [frontOf(u)];
       const f = tiles[0] || frontOf(u);
+      const at = p[i].act === 'lunge' ? start[i] : u;
       events.push({ t: p[i].act, who: i, x: f.x, y: f.y, tiles });
       if (!inTiles(foe, tiles) || inv[1 - i]) {
         events.push({ t: 'miss', who: i });
         continue;
       }
-      if (guard[1 - i] === 2 && relativeSide(foe, u) === 'front') {
+      if (guard[1 - i] === 2 && relativeSide(foe, at) === 'front') {
         foe.bk--;
         events.push({ t: 'block', who: 1 - i });
         const to = step(foe, OPPOSITE[foe.fc]);
@@ -712,7 +696,7 @@ const resolveTurn = (state, plans) => {
         }
         continue;
       }
-      if (guard[1 - i] && relativeSide(foe, u) === 'front') {
+      if (guard[1 - i] && relativeSide(foe, at) === 'front') {
         gainGuts(foe, GUTS_BONUS, events, 1 - i);
         parried[1 - i] = true;
         advanceStance(u); // parried → staggered
@@ -723,9 +707,10 @@ const resolveTurn = (state, plans) => {
       if (p[i].act === 'vslash' || p[i].act === 'hslash') strike(i, SLASH_DMG, 2);
       else if (p[i].act === 'jab') strike(i, JAB_DMG, 1, false);
       else {
-        strike(i, LUNGE_DMG, LUNGE_FLANK);
+        strike(i, LUNGE_DMG, LUNGE_FLANK, true, at);
         const to = step(foe, u.fc);
-        if (launched !== 1 - i && isWalkable(to.x, to.y) && !same(to, u)) {
+        // Only a charge that stopped in front of the foe shoves it onward.
+        if (launched !== 1 - i && same(frontOf(u), foe) && isWalkable(to.x, to.y)) {
           foe.x = to.x;
           foe.y = to.y;
           events.push({ t: 'knock', who: 1 - i, wp: [to] });
@@ -957,13 +942,10 @@ const cpuPlan = (s, i, rnd = M_random) => {
     return { act: 'parry', dir: toFoe };
   }
 
-  // Momentum: lunge if the foe is 2-3 tiles away in a straight line.
+  // Momentum: lunge whenever the foe sits in a 3-tile lane.
   const line = DIR_KEYS.find((k) => same(step(step(me, k), k), foe));
   if (canUse(me, 'lunge')) {
-    const lane = DIR_KEYS.find((k) => {
-      const end = dashPath(me, k, LUNGE_DASH, foe);
-      return same(step(end.length ? end[end.length - 1] : me, k), foe);
-    });
+    const lane = DIR_KEYS.find((k) => inTiles(foe, vslashTiles({ x: me.x, y: me.y, fc: k })));
     if (lane && r < 0.75) return { act: 'lunge', dir: lane };
   }
 
