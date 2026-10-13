@@ -88,7 +88,7 @@ const ST_NORMAL = 0;
 const ST_STAGGERED = 1;
 const ST_KNOCKBACK = 2;
 const ST_DOWN = 3;
-const ST_NAME = ['', 'STAGGERED', 'KNOCKBACK', 'DOWN'];
+const ST_NAME = ['', 'ATURDIDO', 'RETROCESO', 'DERRIBADO'];
 
 // Timing (ms).
 const TURN_MS = 15000;
@@ -233,18 +233,18 @@ const consumePressed = (controls, code) => {
 // A plan is { act, dir } or { act, path }.
 
 const ACTIONS = {
-  move: { name: 'MOVE', spd: 160, target: 'tile', range: 3, info: ['FORWARD 3 // SIDE 2 // BACK 1', 'FURTHER = SLOWER  FWD 3 = MOMENTUM'] },
-  dodge: { name: 'DODGE', spd: 215, target: 'tile', range: 1, info: ['HOP 1 TILE, KEEP FACING', 'VERY FAST: ESCAPE AN ATTACK'] },
-  tele: { name: 'TELEPORT', spd: 215, target: 'tile', range: 3, info: ['BLINK UP TO 5 TILES, ANY ANGLE', '1 CHARGE  INTO AN ATTACK = LAUNCHED'] },
-  pivot: { name: 'PIVOT', spd: 215, target: 'dir', info: ['TURN TO FACE ANOTHER SIDE', 'ATTACKS LOSE 60 SPD PER TURN'] },
-  vslash: { name: 'V-SLASH', spd: 150, target: 'dir', strike: true, info: ['3 TILES FORWARD: 22 DMG', 'X2 ON FLANK'] },
-  hslash: { name: 'H-SLASH', spd: 150, target: 'dir', strike: true, info: ['WIDE SWEEP 3X2: 22 DMG', 'X2 ON FLANK  REACHES DIAGONALS'] },
-  jab: { name: 'JAB', spd: 176, target: 'dir', strike: true, info: ['QUICK POKE: 8 DMG', 'NO COMBO  STOPS SLOWER ACTIONS'] },
-  lunge: { name: 'LUNGE', spd: 210, target: 'dir', strike: true, info: ['CHARGE 3 TILES, HITS THE LANE: 18', 'X2 ON FLANK  NEEDS MOMENTUM'] },
-  parry: { name: 'PARRY', spd: 215, target: 'dir', info: ['BLOCKS STRIKES FROM THE FRONT', 'WHIFF = OPEN NEXT TURN'] },
-  grab: { name: 'GRAB', spd: 180, target: 'dir', info: ['CATCH + THROW: 25+ DMG', 'IGNORES PARRY  WHIFF = OPEN'] },
-  burst: { name: 'BURST', spd: 210, target: 'none', info: ['ESCAPE KNOCKBACK: PUSH + OVERDRIVE', '1 CHARGE // REFILLS ON FULL GUTS'] },
-  wait: { name: 'PASS', spd: 0, target: 'none', info: ['DO NOTHING', ''] },
+  move: { name: 'MOVER', spd: 160, target: 'tile', range: 3, info: ['FRENTE 3 // LADO 2 // ATRAS 1', 'MAS LEJOS = MAS LENTO  3 = IMPULSO'] },
+  dodge: { name: 'ESQUIVA', spd: 215, target: 'tile', range: 1, info: ['SALTA 1 CASILLA SIN GIRAR', 'MUY RAPIDO: EVITA UN ATAQUE'] },
+  tele: { name: 'TELEPORTE', spd: 215, target: 'tile', range: 3, info: ['SALTA HASTA 5 CASILLAS', '1 CARGA  SI TE GOLPEAN, VUELAS'] },
+  pivot: { name: 'GIRAR', spd: 215, target: 'dir', info: ['GIRA HACIA OTRO LADO', 'GIRAR RESTA 60 VEL AL ATAQUE'] },
+  vslash: { name: 'V-SLASH', spd: 150, target: 'dir', strike: true, info: ['3 CASILLAS AL FRENTE: 22 DMG', 'X2 DE FLANCO'] },
+  hslash: { name: 'H-SLASH', spd: 150, target: 'dir', strike: true, info: ['BARRIDO 3X2: 22 DMG', 'X2 DE FLANCO  ALCANZA DIAGONALES'] },
+  jab: { name: 'JAB', spd: 176, target: 'dir', strike: true, info: ['GOLPE RAPIDO: 8 DMG', 'SIN COMBO  CORTA LO MAS LENTO'] },
+  lunge: { name: 'EMBESTIDA', spd: 210, target: 'dir', strike: true, info: ['AVANZA 3 Y GOLPEA TODO: 18 DMG', 'X2 DE FLANCO  REQUIERE IMPULSO'] },
+  parry: { name: 'PARRY', spd: 215, target: 'dir', info: ['DESVIA ATAQUES FRONTALES', 'SI FALLA: EXPUESTO 1 TURNO'] },
+  grab: { name: 'AGARRE', spd: 180, target: 'dir', info: ['ATRAPA Y LANZA: 25+ DMG', 'IGNORA PARRY  FALLAR = EXPUESTO'] },
+  burst: { name: 'BURST', spd: 210, target: 'none', info: ['ROMPE EL RETROCESO + OVERDRIVE', '1 CARGA // SE RECARGA CON GUTS'] },
+  wait: { name: 'PASAR', spd: 0, target: 'none', info: ['NO HACER NADA', ''] },
 };
 const MOVE_ACTS = ['move', 'dodge', 'tele', 'pivot'];
 const COMBAT_ACTS = ['vslash', 'hslash', 'jab', 'lunge', 'parry', 'grab'];
@@ -252,6 +252,7 @@ const STRIKE_ACTS = ['vslash', 'hslash', 'jab', 'lunge'];
 const WAIT_PLAN = { act: 'wait' };
 // Clash picks: parry > thrust > feint > parry; burst beats thrust and feint, loses to parry.
 const CLASH_PICKS = ['thrust', 'parry', 'feint', 'burst'];
+const CLASH_NAMES = ['ESTOCADA', 'PARRY', 'FINTA', 'BURST'];
 const CLASH_WINS = { parry: ['thrust', 'burst'], thrust: ['feint'], feint: ['parry'], burst: ['thrust', 'feint'] };
 
 const newUnit = (start, hp, mx) => {
@@ -423,7 +424,7 @@ const resolveZone = (s, i, events, rnd = M_random) => {
   const t = tileAt(u.x, u.y);
   const zone = ZONE_TILES[t];
   if (!zone) return;
-  const tag = zone.toUpperCase();
+  const tag = zone === 'cat' ? 'RAYO' : zone === 'oil' ? 'CRUDO' : 'VERDIN';
   const color = ZONE_COLOR[zone];
   if (zone === 'cat' && rnd() < ZONE_CHANCE.cat) {
     u.hp = M_max(0, u.hp - ZONE_CAT_DMG);
@@ -785,11 +786,11 @@ const flightOf = (foe, dir, me, fw) => {
     }
     if (k === 4) {
       dmg += ZONE_CAT_DMG;
-      events.push({ t: 'zone', who: fw, zone: 'CAT', dmg: ZONE_CAT_DMG, color: ZONE_COLOR.cat });
+      events.push({ t: 'zone', who: fw, zone: 'RAYO', dmg: ZONE_CAT_DMG, color: ZONE_COLOR.cat });
     } else if (k === 7) {
       dmg += OIL_DMG;
       breaks.push(t);
-      events.push({ t: 'zone', who: fw, zone: 'OIL BLAST', dmg: OIL_DMG, color: ZONE_COLOR.oil }, { t: 'break', who: fw, x: t.x, y: t.y, k });
+      events.push({ t: 'zone', who: fw, zone: 'CRUDO!', dmg: OIL_DMG, color: ZONE_COLOR.oil }, { t: 'break', who: fw, x: t.x, y: t.y, k });
     } else if (k === 6) {
       left++;
       events.push({ t: 'zone', who: fw, zone: 'VERDIN', push: true, color: ZONE_COLOR.verdin });
@@ -1103,8 +1104,8 @@ const drawTiles = (g) => {
 
 // Carved shoreline: charcoal cut with a restrained sunlit rim.
 const drawShore = (g) => {
-  for (let pass = 0; pass < 3; pass++) {
-    g.lS(pass === 0 ? 5 : pass === 1 ? 2.5 : 1, pass === 0 ? C_ink : pass === 1 ? C_coast : C_white, pass === 2 ? 0.55 : 1);
+  for (let pass = 0; pass < 2; pass++) {
+    g.lS(pass ? 2.5 : 5, pass ? C_coast : C_ink, 1);
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
         if (!isLake(x, y)) continue;
@@ -1114,13 +1115,7 @@ const drawShore = (g) => {
           const ny = y + d.dy;
           if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS || isLake(nx, ny)) continue;
           const [i, j] = EDGE[key];
-          const a = pts[i];
-          const b = pts[j];
-          if (pass < 2) g.lB(a.x, a.y, b.x, b.y);
-          else {
-            g.lB(a.x, a.y, a.x + (b.x - a.x) * 0.34, a.y + (b.y - a.y) * 0.34);
-            g.lB(a.x + (b.x - a.x) * 0.56, a.y + (b.y - a.y) * 0.56, b.x, b.y);
-          }
+          g.lB(pts[i].x, pts[i].y, pts[j].x, pts[j].y);
         }
       }
     }
@@ -1133,8 +1128,6 @@ const drawHut = (g, cx, cy) => {
     const hh = 4 * scale;
     g.lS(3 * scale, 0x2a1713, 1);
     for (const p of rhombus(x, y, hw, hh)) g.lB(p.x, p.y, p.x, p.y - 10 * scale);
-    g.fS(0x02070a, 0.45);
-    g.fP(rhombus(x + 5, y + 4, hw + 3, hh + 2), true);
     const base = y - 10 * scale;
     drawPrism(g, x, base, hw, hh, 8 * scale, C_rust, C_wood, 0x3d241f);
     const roof = rhombus(x, base - 8 * scale, hw + 4, hh + 3);
@@ -1145,13 +1138,9 @@ const drawHut = (g, cx, cy) => {
     g.fP([roof[2], roof[1], apex], true);
     g.lS(1.5, C_ink, 1);
     g.sP([roof[3], apex, roof[1], roof[2]], true);
-    g.fS(0xffc76a, 0.75);
-    g.fR(x - 2, base - 6 * scale, 4, 3);
   };
   hut(cx - 6, cy, 1);
   hut(cx + 13, cy + 2, 0.72);
-  g.lS(2, 0x3d2a21, 1);
-  g.lB(cx - 12, cy - 7, cx + 19, cy - 3);
 };
 
 // Solid cable-stayed Puente General Rafael Urdaneta across the northern strait.
@@ -1172,42 +1161,32 @@ const drawBridge = (g) => {
       { x: a.x + nx, y: a.y + ny - DECK_H }, { x: b.x + nx, y: b.y + ny - DECK_H },
       { x: b.x - nx, y: b.y - ny - DECK_H }, { x: a.x - nx, y: a.y - ny - DECK_H },
     ];
-    g.fS(0x02070b, 0.5);
-    g.fP(deck.map((p) => ({ x: p.x + 8, y: p.y + 11 })), true);
     g.fS(0x46545b, 1);
     g.fP([deck[1], deck[2], { x: deck[2].x, y: deck[2].y + 7 }, { x: deck[1].x, y: deck[1].y + 7 }], true);
     g.fS(C_concrete, 1);
     g.fP(deck, true);
     g.lS(2, C_ink, 1);
     g.sP(deck, true);
-    g.lS(1, 0xf2e7c5, 0.85);
-    g.lB(a.x, a.y - DECK_H, b.x, b.y - DECK_H);
   }
 
   for (const x of xs) {
     if (tileAt(x, row) !== 2) continue;
     const t = toIso(x, row);
-    g.fS(0x26363d, 0.7);
-    g.fP([{ x: t.x - 5, y: t.y + 2 }, { x: t.x + 2, y: t.y - 1 }, { x: t.x + 4, y: t.y + 21 }, { x: t.x - 3, y: t.y + 23 }], true);
-    g.lS(1.5, C_ink, 1);
-    g.sP([{ x: t.x - 5, y: t.y + 2 }, { x: t.x + 2, y: t.y - 1 }, { x: t.x + 4, y: t.y + 21 }, { x: t.x - 3, y: t.y + 23 }], true);
+    g.lS(6, 0x26363d, 1);
+    g.lB(t.x - 1, t.y + 1, t.x, t.y + 22);
   }
   for (const x of [xs[0], xs[xs.length - 1]]) {
     if (tileAt(x, row) !== 2) continue;
     const t = toIso(x, row);
     const deckY = t.y - DECK_H;
     const topY = deckY - TOWER_H;
-    // Distinct A-frame pylon, cross braces and bright stay cables.
-    g.lS(7, 0x596970, 1);
-    g.lB(t.x - 9, deckY + 2, t.x, topY);
-    g.lB(t.x + 9, deckY + 2, t.x, topY);
-    g.lS(3, C_concrete, 1);
+    // A-frame pylon and bright stay cables.
+    g.lS(4, C_concrete, 1);
     g.lB(t.x - 8, deckY, t.x, topY);
     g.lB(t.x + 8, deckY, t.x, topY);
-    g.lB(t.x - 5, topY + 22, t.x + 5, topY + 22);
     g.lS(1.4, 0xf7f2db, 0.92);
-    for (let k = 1; k <= 4; k++) {
-      const off = (k * TW) / 5;
+    for (let k = 1; k <= 3; k++) {
+      const off = (k * TW) / 4;
       g.lB(t.x, topY + 3, t.x - off, deckY + off / 2);
       g.lB(t.x, topY + 3, t.x + off, deckY - off / 2);
     }
@@ -1599,7 +1578,7 @@ for (const [k, v] of Object.entries({ fillStyle: 'fS', lineStyle: 'lS', lineBetw
 
 
 const hex = (n) => '#' + n.toString(16).padStart(6, '0');
-const MENU_TITLES = ['MOVEMENT', 'COMBAT'];
+const MENU_TITLES = ['MOVIMIENTO', 'COMBATE'];
 
 // Dynamic menu: adds a BURST row to COMBAT when the unit is KNOCKBACK with a charge left.
 const buildMenu = (u) => {
@@ -1609,10 +1588,10 @@ const buildMenu = (u) => {
   return [MOVE_ACTS, combat];
 };
 const CARDS = [
-  ['CATATUMBO PROTOCOL', 'MECHA DUEL // LAKE MARACAIBO'],
-  ['PROGRAM', 'PICK ONE ACTION\nSPEED RESOLVES FIRST'],
-  ['SWORD CLASH', 'PARRY > THRUST > FEINT > PARRY'],
-  ['CONTROLS', 'STICK  MENU / AIM\nB1  CONFIRM     B2  BACK\nCLASH  B1 THRUST  B2 PARRY  B3 FEINT'],
+  ['PROTOCOLO CATATUMBO', 'DUELO MECHA // LAGO DE MARACAIBO'],
+  ['PROGRAMA', 'ELIGE UNA ACCION\nLA MAS RAPIDA VA PRIMERO'],
+  ['CHOQUE DE ESPADAS', 'PARRY > ESTOCADA > FINTA > PARRY'],
+  ['CONTROLES', 'PALANCA  MENU / APUNTAR\nB1  CONFIRMAR     B2  VOLVER\nCLASH  B1 ESTOCADA  B2 PARRY  B3 FINTA'],
 ];
 
 const txt = (scene, x, y, size, color, originX = 0) => {
@@ -1644,7 +1623,7 @@ const createUi = (scene) => {
     big2: txt(scene, W / 2, 0, 36, hex(C_p1), 0.5).setFontStyle('bold italic').setPadding(32, 0),
     tag: txt(scene, W / 2, 54, 12, '#02140a', 0.5),
     vs: [txt(scene, 175, 284, 17, '#ffffff', 0.5), txt(scene, W / 2, 284, 30, hex(C_gold), 0.5).setFontStyle('bold italic'), txt(scene, 625, 284, 17, '#ffffff', 0.5)],
-    cardT: txt(scene, 250, 340, 12, '#02140a', 0.5),
+    cardT: txt(scene, 263, 340, 12, '#02140a', 0.5),
     card: txt(scene, W / 2, 410, 15, hex(C_grid), 0.5),
     press: txt(scene, W / 2, 520, 30, hex(C_gold), 0.5).setFontStyle('bold italic'),
     // NEXT ENEMY briefing column: code, weapons, arena, mission.
@@ -2012,7 +1991,7 @@ const lockTurn = async (s) => {
     const picks = await askClash(s);
     if (token !== s.token) return;
     s.lastP1Pick = picks[0];
-    s.banner = picks[0].toUpperCase() + '  VS  ' + picks[1].toUpperCase();
+    s.banner = picks.map((p) => CLASH_NAMES[CLASH_PICKS.indexOf(p)]).join('  VS  ');
     const c = resolveClash(s.state, picks);
     if (!(await playEvents(s, c.events, token))) return;
     s.state = c.state;
@@ -2185,7 +2164,7 @@ const playEvents = async (s, events, token) => {
       }));
       ei = end - 1;
     } else if (e.t === 'bump') {
-      floatText(s, u, 'BLOCKED', C_white, 12);
+      floatText(s, u, 'BLOQUEADO', C_white, 12);
       await wait(s, 300);
     } else if (e.t === 'guard') {
       addFx(s, { kd: 'guard', who: e.who, dur: 4000 });
@@ -2209,7 +2188,7 @@ const playEvents = async (s, events, token) => {
         await wait(s, slash ? 110 : 70);
       } else await wait(s, 260);
     } else if (e.t === 'miss') {
-      floatText(s, u, 'MISS', 0x9aa0b0, 14);
+      floatText(s, u, 'FALLO', 0x9aa0b0, 14);
       await wait(s, 350);
     } else if (e.t === 'hit') {
       u.flash = 1;
@@ -2217,7 +2196,7 @@ const playEvents = async (s, events, token) => {
       const hitAt = toIso(u.gx, u.gy);
       addFx(s, { kd: 'shards', x: hitAt.x, y: hitAt.y - 30, color: e.who ? C_cpu : C_p1, dur: 380 });
       s.dH[e.who] = M_max(0, s.dH[e.who] - e.dmg);
-      const dmgText = 'HIT!! -' + e.dmg + (e.flank ? ' FLANK!' : '') + (e.slam ? ' SLAM!' : '');
+      const dmgText = 'GOLPE! -' + e.dmg + (e.flank ? ' FLANCO!' : '') + (e.slam ? ' IMPACTO!' : '');
       floatText(s, u, dmgText, C_white, 17);
       // Combo bonus: if the target was in a non-normal stance, shout it.
       const targetSt = e.prevSt || ST_NORMAL;
@@ -2234,7 +2213,7 @@ const playEvents = async (s, events, token) => {
       s.sfx.parry();
       await wait(s, HIT_PAUSE_MS);
     } else if (e.t === 'interrupt') {
-      floatText(s, u, ACTIONS[e.act].name + ' LOST', C_bolt, 13, 1300);
+      floatText(s, u, ACTIONS[e.act].name + ' PERDIDO', C_bolt, 13, 1300);
       await wait(s, 450);
     } else if (e.t === 'knock') {
       u.pose = 'idle';
@@ -2248,31 +2227,31 @@ const playEvents = async (s, events, token) => {
       if (e.dmg) {
         s.dH[e.who] = M_max(0, s.dH[e.who] - e.dmg);
         u.flash = 1;
-        floatText(s, u, (e.k === 2 ? 'BRIDGE DOWN! -' : 'PALAFITO WRECKED! -') + e.dmg, C_white, 16, 1300);
+        floatText(s, u, (e.k === 2 ? 'PUENTE CAIDO! -' : 'PALAFITO DESTRUIDO! -') + e.dmg, C_white, 16, 1300);
         shake(240, 0.014);
         s.sfx.clash();
         await wait(s, 500);
       }
     } else if (e.t === 'caught') {
-      floatText(s, u, 'CAUGHT!', C_bolt, 17);
+      floatText(s, u, 'ATRAPADO!', C_bolt, 17);
       s.sfx.hit();
       await wait(s, 400);
     } else if (e.t === 'throw') {
-      floatText(s, u, 'THROW!', unitColor(e.who), 17);
+      floatText(s, u, 'LANZA!', unitColor(e.who), 17);
       await wait(s, 200);
     } else if (e.t === 'launch') {
-      floatText(s, u, 'LAUNCHED!', C_bolt, 17);
+      floatText(s, u, 'LANZADO!', C_bolt, 17);
       shake(160, 0.01);
       await wait(s, 250);
     } else if (e.t === 'refresh') {
-      floatText(s, u, 'GUTS FULL! CHARGES READY', C_bolt, 14, 1300);
+      floatText(s, u, 'GUTS LLENO! CARGAS LISTAS', C_bolt, 14, 1300);
       s.sfx.lock();
       await wait(s, 300);
     } else if (e.t === 'open') {
-      floatText(s, u, 'WHIFF! OPEN', C_cpu, 15, 1200);
+      floatText(s, u, 'FALLO! EXPUESTO', C_cpu, 15, 1200);
       await wait(s, 350);
     } else if (e.t === 'momentum') {
-      floatText(s, u, 'MOMENTUM', C_bolt, 13);
+      floatText(s, u, 'IMPULSO', C_bolt, 13);
     } else if (e.t === 'burst') {
       u.st = ST_NORMAL;
       floatText(s, u, 'BURST!', C_bolt, 17);
@@ -2283,13 +2262,13 @@ const playEvents = async (s, events, token) => {
     } else if (e.t === 'stance') {
       u.st = e.st;
       const stColors = [C_coast, C_bolt, C_cpu, C_white];
-      const stLabel = ['RECOVERED', 'STAGGERED', 'KNOCKBACK', 'DOWN'][e.st];
+      const stLabel = ['RECUPERADO', 'ATURDIDO', 'RETROCESO', 'DERRIBADO'][e.st];
       addFx(s, { kd: 'flash', color: stColors[e.st] || C_white, dur: 180 });
       if (stLabel) floatText(s, u, stLabel, stColors[e.st] || C_white, 16);
       await wait(s, 250);
     } else if (e.t === 'zone') {
-      const zLabel = e.zone + (e.dmg ? ' -' + e.dmg : '') + (e.guts ? ' +' + GUTS_BONUS + ' GUTS' : '') + (e.push ? ' SLIP!' : '') + (e.st ? ' ' + ST_NAME[e.st] : '');
-      if (e.zone === 'CAT') {
+      const zLabel = e.zone + (e.dmg ? ' -' + e.dmg : '') + (e.guts ? ' +' + GUTS_BONUS + ' GUTS' : '') + (e.push ? ' RESBALA!' : '') + (e.st ? ' ' + ST_NAME[e.st] : '');
+      if (e.zone === 'RAYO') {
         const strike = toIso(u.gx, u.gy);
         addFx(s, { kd: 'bolt', pts: makeBoltPoints(strike.x, strike.y - 22), dur: 500 });
         addFx(s, { kd: 'shards', x: strike.x, y: strike.y - 20, color: C_bolt, dur: 420 });
@@ -2318,10 +2297,10 @@ const playEvents = async (s, events, token) => {
       addFx(s, { kd: 'flash', dur: 180 });
       shake(220, 0.012);
       s.sfx.clash();
-      s.banner = e.t === 'clash' ? 'CLASH!!' : 'MIRROR!  BOTH KNOCKED BACK';
+      s.banner = e.t === 'clash' ? 'CLASH!!' : 'ESPEJO! AMBOS RETROCEDEN';
       await wait(s, CLASH_PAUSE_MS);
     } else if (e.t === 'clashWin') {
-      floatText(s, u, 'WINS CLASH', unitColor(e.who), 17);
+      floatText(s, u, 'GANA EL CLASH', unitColor(e.who), 17);
       await wait(s, 300);
     }
   }
@@ -2420,7 +2399,7 @@ const drawWorld = (s, time, delta) => {
     const off = near ? M_sign(v.gx + v.gy - n.gx - n.gy || i * 2 - 1) * 22 : 0;
     drawMiniBar(gu, p.x + off, p.y + 12, s.dH[i] / s.state.us[i].mx, unitColor(i));
     s.ui.tags[i].setPosition(p.x + off, p.y + 25);
-    const stName = ['P1', 'CPU'][i] + (v.st ? '  ' + ST_NAME[v.st] : '') + (s.state.us[i].open ? '  OPEN' : '');
+    const stName = ['P1', 'CPU'][i] + (v.st ? '  ' + ST_NAME[v.st] : '') + (s.state.us[i].open ? '  EXPUESTO' : '');
     setT(s.ui.tags[i], stName);
     const ready = i === 0 ? !!s.p1Plan && s.ph === 'locked' : s.ph === 'locked' || (play && (s.ph === 'choose' || s.ph === 'aim') && time > s.cRdy);
     if (ready) drawCheck(gu, p.x + 16, p.y - 50, unitColor(i));
@@ -2502,7 +2481,7 @@ const drawHud = (s, time) => {
     ui.status[i].setPosition(i ? W - 84 : 84, 57);
     setT(ui.names[i], (i ? 'CPU LV' + s.stage : 'P1 MARACAIBO') + ' // HP ' + M_max(0, s.dH[i]));
     const stLabel = ST_NAME[u.st] || '';
-    setT(ui.status[i], [stLabel, u.open && 'OPEN', u.od && 'OVERDRIVE ' + u.od, u.momentum && 'MOMENTUM', canUse(u, 'burst') && 'BURST READY'].filter(Boolean).join(' // '));
+    setT(ui.status[i], [stLabel, u.open && 'EXPUESTO', u.od && 'OVERDRIVE ' + u.od, u.momentum && 'IMPULSO', canUse(u, 'burst') && 'BURST LISTO'].filter(Boolean).join(' // '));
   });
 
   // Reserved top-centre action telemetry, clear of both HP panels.
@@ -2515,8 +2494,8 @@ const drawHud = (s, time) => {
     const plan = selPlan(s) || { act: s.sel.act, dir: me.fc };
     const available = (canAct(me) || a.target === 'none') && canUse(me, s.sel.act);
     info = available
-      ? [a.name + '  //  SPD ' + speedOf(me, plan), a.info[0], a.info[1]]
-      : [a.name + '  //  LOCKED', canAct(me) ? 'NEEDS MOMENTUM' : 'ONLY BURST BREAKS KNOCKBACK', canAct(me) ? 'MOVE FORWARD 3 FIRST' : 'NO CHARGE: FILL GUTS TO REFRESH'];
+      ? [a.name + '  //  VEL ' + speedOf(me, plan), a.info[0], a.info[1]]
+      : [a.name + '  //  BLOQUEADO', canAct(me) ? 'REQUIERE IMPULSO' : 'SOLO BURST ROMPE EL RETROCESO', canAct(me) ? 'AVANZA 3 ANTES' : 'SIN CARGA: LLENA GUTS'];
     drawLabelSlab(g, 244, 9, 312, 56, C_p1, false);
   }
   info.forEach((t, k) => setT(ui.info[k], t));
@@ -2525,23 +2504,23 @@ const drawHud = (s, time) => {
   let ph = '';
   let hint = '';
   if (play && aiming && s.ph === 'choose') {
-    ph = 'TURN ' + s.state.turn + '  //  PICK AN ACTION';
-    hint = 'L/R TYPE   U/D ACTION   B1 SELECT';
+    ph = 'TURNO ' + s.state.turn + '  //  ELIGE ACCION';
+    hint = 'IZQ/DER TIPO   ARR/ABA ACCION   B1 ELEGIR';
   } else if (play && aiming) {
-    ph = 'AIM // ' + ACTIONS[s.sel.act].name;
-    hint = 'STICK AIM   B1 CONFIRM   B2 BACK';
+    ph = 'APUNTA // ' + ACTIONS[s.sel.act].name;
+    hint = 'PALANCA APUNTA   B1 CONFIRMA   B2 VOLVER';
   } else if (play && s.ph === 'choose' && !canAct(me)) {
-    ph = me.open ? 'OPEN // WHIFF RECOVERY' : ST_NAME[me.st];
-    hint = 'CANNOT ACT THIS TURN';
+    ph = me.open ? 'EXPUESTO // RECUPERANDO' : ST_NAME[me.st];
+    hint = 'NO PUEDES ACTUAR';
   } else if (play && s.ph === 'locked') {
-    ph = 'COMMAND LOCKED';
-    hint = time > s.cRdy ? 'BOTH PILOTS READY' : 'ENEMY ENCRYPTED...';
+    ph = 'ORDEN FIJADA';
+    hint = time > s.cRdy ? 'AMBOS PILOTOS LISTOS' : 'ENEMIGO CIFRADO...';
   } else if (play && s.ph === 'clash') {
-    ph = 'SWORD CLASH // PICK FAST';
-    hint = 'PARRY > THRUST > FEINT > PARRY   BURST BEATS THRUST + FEINT';
+    ph = 'CHOQUE DE ESPADAS // RAPIDO';
+    hint = 'PARRY > ESTOCADA > FINTA > PARRY   BURST VENCE ESTOCADA Y FINTA';
   } else if (play && s.ph === 'throw') {
-    ph = 'TARGET CAPTURED // THROW';
-    hint = 'STICK AIM   B1 THROW   SMASH HUTS / BRIDGE';
+    ph = 'OBJETIVO ATRAPADO // LANZA';
+    hint = 'PALANCA APUNTA   B1 LANZA   ROMPE PALAFITOS / PUENTE';
   } else if (s.ph === 'resolve') ph = s.banner;
   setT(ui.ph, play ? ph : '');
   setT(ui.hint, hint);
@@ -2577,7 +2556,7 @@ const drawHud = (s, time) => {
     arc(cx, cy, 62, -2.8, 0.35, C_cpu, 4, 1);
     arc(cx, cy, 79, -0.15, 2.65, C_cpu, 3, 0.65);
     drawShards(g, cx, cy, C_cpu, 0.9);
-    const opts = us[0].bursts ? ['THRUST', 'PARRY', 'FEINT', 'BURST'] : ['THRUST', 'PARRY', 'FEINT'];
+    const opts = CLASH_NAMES.slice(0, us[0].bursts ? 4 : 3);
     const side = cx < 530 ? 1 : -1;
     const cardX = side > 0 ? M_min(W - 174, cx + 88) : M_max(14, cx - 262);
     const cardY = M_max(100, M_min(H - 170 - opts.length * 43, cy - 83));
@@ -2605,7 +2584,7 @@ const drawHud = (s, time) => {
     t.setVisible(!!it);
     if (!it) return;
     // Pool objects stay API-minimal for the cabinet harness; geometry carries hierarchy.
-    if (it.kd === 'cat') drawLabelSlab(g, it.x - 47, it.y - 11, 94, 22, C_p1, it.on);
+    if (it.kd === 'cat') drawLabelSlab(g, it.x - 54, it.y - 11, 108, 22, C_p1, it.on);
     if (it.kd === 'act') drawLabelSlab(g, it.x - (it.on ? 59 : 52), it.y - 10, it.on ? 118 : 104, 20, C_p1, it.on);
     t.setColor(it.on || it.kd === 'clash' ? '#ffffff' : it.kd === 'key' ? '#ff9ab1' : it.off ? '#53616a' : it.kd === 'cat' ? hex(C_coast) : '#dce5e5');
     t.setPosition(it.x, it.y);
@@ -2660,15 +2639,15 @@ const drawHud = (s, time) => {
     }
     g.fS(C_grid, 1);
     g.fR(255, 45, 290, 19);
-    g.fR(160, 331, 180, 19);
+    g.fR(160, 331, 206, 19);
     drawChevron(g, 30, 262, 300, 44, C_p1, 1);
     drawChevron(g, 470, 262, 300, 44, C_cpu, -1);
     g.lS(3, C_grid, 0.9);
     g.sP([{ x: 150, y: 340 }, { x: 650, y: 340 }, { x: 650, y: 470 }, { x: 170, y: 470 }, { x: 150, y: 450 }], true);
-    const cards = s.top.length ? [...CARDS, ['TOP PILOTS', s.top.map((e, k) => k + 1 + '. ' + e.n + '  ' + e.s).join('\n')]] : CARDS;
+    const cards = s.top.length ? [...CARDS, ['MEJORES PILOTOS', s.top.map((e, k) => k + 1 + '. ' + e.n + '  ' + e.s).join('\n')]] : CARDS;
     card = cards[M_floor((time - s.attractStart) / CARD_MS) % cards.length];
     big = 'CATATUMBO';
-    big2 = 'PROTOCOL';
+    big2 = 'PROTOCOLO';
     tint(ui.big, C_gold);
     ui.big.setY(122).setScale(1);
     ui.big2.setPosition(W / 2, 184);
@@ -2682,27 +2661,27 @@ const drawHud = (s, time) => {
       g.lB(0, k * 32, W, k * 32);
     }
     g.fS(C_cpu, 1);
-    g.fillTriangle(150, 38, 150, 66, 166, 52);
-    g.fillTriangle(650, 38, 650, 66, 634, 52);
+    g.fillTriangle(122, 38, 122, 66, 138, 52);
+    g.fillTriangle(678, 38, 678, 66, 662, 52);
     const c = toIso(0, 0);
     s.gWire.setPosition(200 - c.x * 3.2, 515 - c.y * 3.2);
     drawMecha(s.gWire, 0, 0, DIR_KEYS[M_floor(time / 450) % 4], C_cpu, 1, 0, 0, 'idle', 0, 1);
     const n = s.stage;
-    big = 'NEXT ENEMY';
+    big = 'PROXIMO RIVAL';
     big2 = 'VR.CABIMAS';
     tint(ui.big, C_cpu);
     ui.big.setY(52).setScale(0.8);
     ui.big2.setPosition(560, 205);
-    ne = ['RVR-26-C  LV' + n, 'V-SLASH    H-SLASH\nJAB    LUNGE    GRAB', '- LAKE MARACAIBO -', n + ([, 'st', 'nd', 'rd'][n] || 'th') + '. MISSION'];
+    ne = ['RVR-26-C  LV' + n, 'V-SLASH    H-SLASH\nJAB    EMBESTIDA    AGARRE', '- LAGO DE MARACAIBO -', n + 'A MISION'];
   } else if (s.ph === 'over') {
     const o = s.state.over;
-    title = o === 'p1' ? 'STAGE ' + s.stage + ' CLEAR' : o === 'cpu' ? 'DEFEATED' : 'DRAW';
+    title = o === 'p1' ? 'ETAPA ' + s.stage + ' SUPERADA' : o === 'cpu' ? 'DERROTA' : 'EMPATE';
     titleColor = o === 'p1' ? C_p1 : o === 'cpu' ? C_cpu : C_bolt;
-    sub = 'SCORE ' + s.score + '\n' + (time > s.phS + ATTRACT_OVER_MS && blinkOn ? (o === 'p1' ? 'PRESS START: NEXT PILOT' : 'PRESS START') : ' ');
+    sub = 'PUNTOS ' + s.score + '\n' + (time > s.phS + ATTRACT_OVER_MS && blinkOn ? (o === 'p1' ? 'PULSA START: SIGUIENTE' : 'PULSA START') : ' ');
   } else if (s.ph === 'name') {
-    title = 'NEW RECORD';
+    title = 'NUEVO RECORD';
     titleColor = C_bolt;
-    sub = 'SCORE ' + s.score + '\n' + initials(s.ini).split('').map((ch, k) => (k === s.iniPos ? '[' + ch + ']' : ' ' + ch + ' ')).join(' ') + '\nUP/DOWN LETTER   B1 NEXT';
+    sub = 'PUNTOS ' + s.score + '\n' + initials(s.ini).split('').map((ch, k) => (k === s.iniPos ? '[' + ch + ']' : ' ' + ch + ' ')).join(' ') + '\nARR/ABA LETRA   B1 SIGUIENTE';
   }
   if (title) {
     drawLabelSlab(g, W / 2 - 222, 112, 444, 52, titleColor, true);
@@ -2722,7 +2701,7 @@ const drawHud = (s, time) => {
   ne.forEach((t, k) => setT(ui.ne[k], t));
   setT(ui.cardT, card[0]);
   setT(ui.card, card[1]);
-  setT(ui.press, !play && blinkOn ? 'PRESS START' : '');
+  setT(ui.press, !play && blinkOn ? 'PULSA START' : '');
 };
 
 // Boot last: every helper above is initialised before Phaser can call create().
