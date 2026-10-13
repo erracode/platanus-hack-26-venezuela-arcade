@@ -61,6 +61,7 @@ const JAB_DMG = 8; // quick poke: never advances stance
 const LUNGE_FLANK = 2; // lunge damage multiplier when hitting a side or the back
 const LUNGE_DASH = 2;
 const TP_RANGE = 5; // teleport reach (Manhattan tiles)
+const BLOCK_MAX = 5; // shield durability; refills with a full GUTS meter
 const GRAB_DMG = 10;
 const THROW_DMG = 15;
 const SLAM_DMG = 10; // extra when the throw hits land / the edge
@@ -241,13 +242,15 @@ const ACTIONS = {
   hslash: { name: 'H-SLASH', spd: 150, target: 'dir', strike: true, info: ['BARRIDO 3X2: 22 DMG', 'X2 DE FLANCO  ALCANZA DIAGONALES'] },
   jab: { name: 'JAB', spd: 176, target: 'dir', strike: true, info: ['GOLPE RAPIDO: 8 DMG', 'SIN COMBO  CORTA LO MAS LENTO'] },
   lunge: { name: 'EMBESTIDA', spd: 210, target: 'dir', strike: true, info: ['AVANZA 3 Y GOLPEA TODO: 18 DMG', 'X2 DE FLANCO  REQUIERE IMPULSO'] },
+  block: { name: 'ESCUDO', spd: 215, target: 'dir', info: ['BLOQUEA TODO LO FRONTAL', 'TE EMPUJA 1 ATRAS  SIN CASTIGO'] },
+  vent: { name: 'VENT', spd: 165, target: 'none', info: ['GUTS A VIDA (4:1)', 'EMPUJA AL RIVAL CERCANO'] },
   parry: { name: 'PARRY', spd: 215, target: 'dir', info: ['DESVIA ATAQUES FRONTALES', 'SI FALLA: EXPUESTO 1 TURNO'] },
   grab: { name: 'AGARRE', spd: 180, target: 'dir', info: ['ATRAPA Y LANZA: 25+ DMG', 'IGNORA PARRY  FALLAR = EXPUESTO'] },
   burst: { name: 'BURST', spd: 210, target: 'none', info: ['ROMPE EL RETROCESO + OVERDRIVE', '1 CARGA // SE RECARGA CON GUTS'] },
   wait: { name: 'PASAR', spd: 0, target: 'none', info: ['NO HACER NADA', ''] },
 };
 const MOVE_ACTS = ['move', 'dodge', 'tele', 'pivot'];
-const COMBAT_ACTS = ['vslash', 'hslash', 'jab', 'lunge', 'parry', 'grab'];
+const COMBAT_ACTS = ['vslash', 'hslash', 'jab', 'lunge', 'parry', 'block', 'grab', 'vent'];
 const STRIKE_ACTS = ['vslash', 'hslash', 'jab', 'lunge'];
 const WAIT_PLAN = { act: 'wait' };
 // Clash picks: parry > thrust > feint > parry; burst beats thrust and feint, loses to parry.
@@ -257,7 +260,7 @@ const CLASH_WINS = { parry: ['thrust', 'burst'], thrust: ['feint'], feint: ['par
 
 const newUnit = (start, hp, mx) => {
   // open: whiffed a parry/grab and must skip the next turn.
-  return { x: start.x, y: start.y, fc: start.fc, hp, mx, guts: 0, bursts: 1, tp: 1, od: 0, momentum: false, st: ST_NORMAL, open: false };
+  return { x: start.x, y: start.y, fc: start.fc, hp, mx, guts: 0, bursts: 1, tp: 1, bk: BLOCK_MAX, od: 0, momentum: false, st: ST_NORMAL, open: false };
 };
 
 const newState = (stage = 1, hp = HP_MAX) => {
@@ -306,6 +309,8 @@ const dirBetween = (a, b) => {
 const canUse = (u, act) => {
   if (act === 'lunge') return u.momentum || u.od > 0;
   if (act === 'tele') return u.tp > 0;
+  if (act === 'block') return u.bk > 0;
+  if (act === 'vent') return u.guts >= 20;
   if (act === 'burst') return u.st === ST_KNOCKBACK && u.bursts > 0;
   return true;
 };
@@ -394,12 +399,13 @@ const previewPlan = (u, plan, other) => {
   return { x: u.x, y: u.y, fc: a.target === 'dir' ? plan.dir : u.fc };
 };
 
-// A full meter resets and refreshes the BURST charge; while a charge is held it waits at max.
+// A full meter resets and refreshes every charge (BURST, TELEPORT, shield durability).
 const gainGuts = (u, n, events, who) => {
   u.guts = M_min(GUTS_MAX, u.guts + n);
-  if (u.guts < GUTS_MAX || u.bursts) return;
+  if (u.guts < GUTS_MAX) return;
   u.guts = 0;
   u.bursts = u.tp = 1;
+  u.bk = BLOCK_MAX;
   events.push({ t: 'refresh', who });
 };
 
@@ -643,33 +649,41 @@ const resolveTurn = (state, plans) => {
     }
 
     for (const i of acting) {
-      if (p[i].act === 'parry') {
-        guard[i] = true;
+      if (p[i].act === 'parry' || p[i].act === 'block') {
+        guard[i] = p[i].act === 'parry' ? 1 : 2;
         events.push({ t: 'guard', who: i });
       }
+      const me = U[i];
+      const foe = U[1 - i];
       if (p[i].act === 'burst') {
-        const me = U[i];
-        const foe = U[1 - i];
         me.bursts = 0;
         me.st = ST_NORMAL;
         me.od = OD_TURNS;
         inv[i] = true;
         events.push({ t: 'burst', who: i });
-        // Shockwave: an adjacent foe (diagonals too) is hurt, pushed away and loses its action.
-        if (M_abs(foe.x - me.x) <= 1 && M_abs(foe.y - me.y) <= 1) {
+      }
+      if (p[i].act === 'vent') {
+        const heal = M_min(me.mx - me.hp, M_floor(me.guts / 4));
+        me.hp += heal;
+        me.guts = 0;
+        events.push({ t: 'vent', who: i, heal });
+      }
+      // Shockwave (BURST hurts, VENT only shoves): an adjacent foe is pushed away and loses its action.
+      if ((p[i].act === 'burst' || p[i].act === 'vent') && M_abs(foe.x - me.x) <= 1 && M_abs(foe.y - me.y) <= 1) {
+        if (p[i].act === 'burst') {
           foe.hp = M_max(0, foe.hp - BURST_DMG);
           hurt[1 - i] = true;
           events.push({ t: 'hit', who: 1 - i, dmg: BURST_DMG, combo: false });
-          const to = { x: foe.x + M_sign(foe.x - me.x), y: foe.y + M_sign(foe.y - me.y) };
-          if (isWalkable(to.x, to.y)) {
-            foe.x = to.x;
-            foe.y = to.y;
-            events.push({ t: 'knock', who: 1 - i, wp: [to] });
-          }
-          if (!g.includes(1 - i) && !done[1 - i] && p[1 - i].act !== 'wait' && !cancelled[1 - i]) {
-            cancelled[1 - i] = true;
-            events.push({ t: 'interrupt', who: 1 - i, act: p[1 - i].act });
-          }
+        }
+        const to = { x: foe.x + M_sign(foe.x - me.x), y: foe.y + M_sign(foe.y - me.y) };
+        if (isWalkable(to.x, to.y)) {
+          foe.x = to.x;
+          foe.y = to.y;
+          events.push({ t: 'knock', who: 1 - i, wp: [to] });
+        }
+        if (!g.includes(1 - i) && !done[1 - i] && p[1 - i].act !== 'wait' && !cancelled[1 - i]) {
+          cancelled[1 - i] = true;
+          events.push({ t: 'interrupt', who: 1 - i, act: p[1 - i].act });
         }
       }
     }
@@ -684,6 +698,17 @@ const resolveTurn = (state, plans) => {
       events.push({ t: p[i].act, who: i, x: f.x, y: f.y, tiles });
       if (!inTiles(foe, tiles) || inv[1 - i]) {
         events.push({ t: 'miss', who: i });
+        continue;
+      }
+      if (guard[1 - i] === 2 && relativeSide(foe, u) === 'front') {
+        foe.bk--;
+        events.push({ t: 'block', who: 1 - i });
+        const to = step(foe, OPPOSITE[foe.fc]);
+        if (isWalkable(to.x, to.y) && !same(to, u)) {
+          foe.x = to.x;
+          foe.y = to.y;
+          events.push({ t: 'knock', who: 1 - i, wp: [to] });
+        }
         continue;
       }
       if (guard[1 - i] && relativeSide(foe, u) === 'front') {
@@ -740,7 +765,7 @@ const resolveTurn = (state, plans) => {
 
   U.forEach((u, i) => {
     // A parry that blocked nothing leaves the unit open, unless it was already punished this turn.
-    if (guard[i] && !parried[i] && !hurt[i]) {
+    if (guard[i] === 1 && !parried[i] && !hurt[i]) {
       u.open = true;
       events.push({ t: 'open', who: i });
     }
@@ -905,6 +930,8 @@ const cpuPlan = (s, i, rnd = M_random) => {
     if (tpReach(s, i).has(back.x + ',' + back.y)) return { act: 'tele', wp: [back] };
   }
 
+  if (canUse(me, 'vent') && me.guts >= 40 && me.hp < me.mx * 0.6 && rnd() < 0.5) return { act: 'vent' };
+
   // Chain the combo: if the foe is staggered/knocked/down/open and in vslash range, press it.
   if (foe.st !== ST_NORMAL || foe.open) {
     const lane = DIR_KEYS.find((k) => {
@@ -920,7 +947,7 @@ const cpuPlan = (s, i, rnd = M_random) => {
     if (!threatened) return { act: r < 0.45 ? 'vslash' : r < 0.65 ? 'jab' : r < 0.85 ? 'grab' : 'parry', dir: toFoe };
     if (r < 0.2) return { act: 'vslash', dir: toFoe };
     if (r < 0.4) return { act: 'jab', dir: toFoe };
-    if (r < 0.6) return { act: 'parry', dir: toFoe };
+    if (r < 0.6) return { act: r < 0.5 || !canUse(me, 'block') ? 'parry' : 'block', dir: toFoe };
     if (r < 0.75) return { act: 'grab', dir: toFoe };
     const o = outs();
     if (o.length) return { act: 'dodge', wp: pick(o) };
@@ -1066,25 +1093,6 @@ const drawTiles = (g) => {
       g.lS(1, water ? C_waterLo : C_landDark, water ? 0.48 : 0.72);
       g.sP(pts, true);
 
-      // Deterministic micro-texture: short ripples, tiny facets and sparse dither.
-      if (water) {
-        const ox = (hash % 5) - 2;
-        const oy = ((hash * 3) % 5) - 2;
-        g.lS(1, hash & 1 ? 0x31a0aa : 0x0a8494, 0.25 + (hash % 3) * 0.08);
-        g.lB(c.x - 8 + ox, c.y - 2 + oy, c.x - 1 + ox, c.y - 4 + oy);
-        if (hash % 3 === 0) g.lB(c.x + 3, c.y + 3, c.x + 9, c.y + 1);
-        if (hash % 5 === 0) {
-          g.fS(0xa7d8d2, 0.16);
-          g.fR(c.x + ox, c.y + oy, 2, 1);
-        }
-      } else {
-        g.lS(1, hash & 1 ? 0x58704b : 0x1d3928, 0.35);
-        g.lB(c.x - 7, c.y + (hash % 4) - 2, c.x - 1, c.y + (hash % 4) - 4);
-        if (hash % 4 === 0) {
-          g.fS(0x75553a, 0.3);
-          g.fillTriangle(c.x + 4, c.y - 2, c.x + 9, c.y, c.x + 5, c.y + 2);
-        }
-      }
       if (t === 4) {
         g.fS(0x1c2638, 0.38);
         g.fC(c.x - 3, c.y - 2, 5);
@@ -1385,6 +1393,15 @@ const drawLabelSlab = (g, x, y, w, h, color, selected) => {
   g.sP(pts, true);
   g.lS(selected ? 4 : 2, color, selected ? 1 : 0.5);
   g.lB(x + cut, y, x + M_min(w * 0.42, 78), y);
+};
+
+// M.S.B.S.-style CRT grid over the whole screen.
+const crtGrid = (g, color) => {
+  g.lS(1, color, 0.13);
+  for (let k = 0; k <= 25; k++) {
+    g.lB(k * 32, 0, k * 32, H);
+    g.lB(0, k * 32, W, k * 32);
+  }
 };
 
 // Virtual-On style arrow plate pointing toward the centre (dir 1 = right, -1 = left).
@@ -2166,6 +2183,17 @@ const playEvents = async (s, events, token) => {
     } else if (e.t === 'bump') {
       floatText(s, u, 'BLOQUEADO', C_white, 12);
       await wait(s, 300);
+    } else if (e.t === 'block') {
+      floatText(s, u, 'ESCUDO!', C_p1, 17);
+      ring(s, u, C_p1, 20, 340);
+      s.sfx.parry();
+      await wait(s, 300);
+    } else if (e.t === 'vent') {
+      s.dH[e.who] += e.heal;
+      floatText(s, u, 'VENT +' + e.heal + ' HP', C_grid, 17);
+      ring(s, u, C_grid, 26, 480);
+      s.sfx.lock();
+      await wait(s, 400);
     } else if (e.t === 'guard') {
       addFx(s, { kd: 'guard', who: e.who, dur: 4000 });
       u.pose = 'hslash';
@@ -2356,7 +2384,7 @@ const drawWorld = (s, time, delta) => {
       }
       if (sel.act !== 'pivot') {
         const end = previewPlan(me, { act: sel.act, dir: sel.dir }, s.state.us[1]);
-        const col = sel.act === 'parry' ? C_white : C_cpu;
+        const col = ACTIONS[sel.act].strike ? C_cpu : C_white;
         const atkTiles =
           sel.act === 'vslash'
             ? vslashTiles({ x: end.x, y: end.y, fc: sel.dir })
@@ -2494,8 +2522,8 @@ const drawHud = (s, time) => {
     const plan = selPlan(s) || { act: s.sel.act, dir: me.fc };
     const available = (canAct(me) || a.target === 'none') && canUse(me, s.sel.act);
     info = available
-      ? [a.name + '  //  VEL ' + speedOf(me, plan), a.info[0], a.info[1]]
-      : [a.name + '  //  BLOQUEADO', canAct(me) ? 'REQUIERE IMPULSO' : 'SOLO BURST ROMPE EL RETROCESO', canAct(me) ? 'AVANZA 3 ANTES' : 'SIN CARGA: LLENA GUTS'];
+      ? [a.name + '  //  VEL ' + speedOf(me, plan) + (s.sel.act === 'block' ? '  ' + me.bk + '/' + BLOCK_MAX : ''), a.info[0], a.info[1]]
+      : [a.name + '  //  BLOQUEADO', s.sel.act === 'lunge' ? 'REQUIERE IMPULSO: AVANZA 3 ANTES' : 'SIN CARGA: LLENA GUTS', ''];
     drawLabelSlab(g, 244, 9, 312, 56, C_p1, false);
   }
   info.forEach((t, k) => setT(ui.info[k], t));
@@ -2520,7 +2548,7 @@ const drawHud = (s, time) => {
     hint = 'PARRY > ESTOCADA > FINTA > PARRY   BURST VENCE ESTOCADA Y FINTA';
   } else if (play && s.ph === 'throw') {
     ph = 'OBJETIVO ATRAPADO // LANZA';
-    hint = 'PALANCA APUNTA   B1 LANZA   ROMPE PALAFITOS / PUENTE';
+    hint = 'PALANCA APUNTA   B1 LANZA';
   } else if (s.ph === 'resolve') ph = s.banner;
   setT(ui.ph, play ? ph : '');
   setT(ui.hint, hint);
@@ -2632,11 +2660,7 @@ const drawHud = (s, time) => {
     // Title screen: the demo duel runs dimmed behind a CRT grid (M.S.B.S. / VS screen homage).
     g.fS(0x010806, 0.62);
     g.fR(0, 0, W, H);
-    g.lS(1, C_grid, 0.14);
-    for (let k = 0; k <= 25; k++) {
-      g.lB(k * 32, 0, k * 32, H);
-      g.lB(0, k * 32, W, k * 32);
-    }
+    crtGrid(g, C_grid);
     g.fS(C_grid, 1);
     g.fR(255, 45, 290, 19);
     g.fR(160, 331, 206, 19);
@@ -2655,11 +2679,7 @@ const drawHud = (s, time) => {
     // NEXT ENEMY briefing: CRT grid, spinning wireframe of the rival, its spec sheet and the arena.
     g.fS(0x01060a, 0.97);
     g.fR(0, 0, W, H);
-    g.lS(1, C_p1, 0.12);
-    for (let k = 0; k <= 25; k++) {
-      g.lB(k * 32, 0, k * 32, H);
-      g.lB(0, k * 32, W, k * 32);
-    }
+    crtGrid(g, C_p1);
     g.fS(C_cpu, 1);
     g.fillTriangle(122, 38, 122, 66, 138, 52);
     g.fillTriangle(678, 38, 678, 66, 662, 52);
