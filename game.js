@@ -1000,10 +1000,10 @@ function drawPrism(g, cx, cy, hw, hh, h, color, mid = C_landMid, dark = C_landDa
   const left = [top[3], top[2], { x: cx, y: cy + hh }, { x: cx - hw, y: cy }];
   const right = [top[2], top[1], { x: cx + hw, y: cy }, { x: cx, y: cy + hh }];
   [[left, mid], [right, dark], [top, color]].forEach(([face, fill]) => {
-    g.fillStyle(fill, 1);
-    g.fillPoints(face, true);
-    g.lineStyle(1, C_ink, 0.9);
-    g.strokePoints(face, true);
+    g.fS(fill, 1);
+    g.fP(face, true);
+    g.lS(1, C_ink, 0.9);
+    g.sP(face, true);
   });
 }
 
@@ -1021,17 +1021,17 @@ function drawSlab(g) {
   for (let k = 0; k < edges.length; k++) {
     const [a, b] = edges[k];
     const quad = [a, b, { x: b.x, y: b.y + SLAB_H }, { x: a.x, y: a.y + SLAB_H }];
-    g.fillStyle(a.x < b.x ? 0x102b25 : 0x081a1d, 1);
-    g.fillPoints(quad, true);
-    g.lineStyle(1.5, C_ink, 1);
-    g.strokePoints(quad, true);
-    g.lineStyle(1, 0x376153, 0.42);
-    g.lineBetween(a.x, a.y + 4, b.x, b.y + 4);
+    g.fS(a.x < b.x ? 0x102b25 : 0x081a1d, 1);
+    g.fP(quad, true);
+    g.lS(1.5, C_ink, 1);
+    g.sP(quad, true);
+    g.lS(1, 0x376153, 0.42);
+    g.lB(a.x, a.y + 4, b.x, b.y + 4);
     if (k % 3 === 0) {
       const x = (a.x + b.x) / 2;
       const y = (a.y + b.y) / 2 + 9;
-      g.fillStyle(0x668071, 0.55);
-      g.fillCircle(x, y, 1.2);
+      g.fS(0x668071, 0.55);
+      g.fC(x, y, 1.2);
     }
   }
 }
@@ -1050,41 +1050,41 @@ function drawTiles(g) {
       if (t === 4) color = 0x164957;
       if (t === 6) color = 0x22664a;
       if (t === 7) color = 0x174956;
-      g.fillStyle(color, 1);
-      g.fillPoints(pts, true);
-      g.lineStyle(1, water ? C_waterLo : C_landDark, water ? 0.48 : 0.72);
-      g.strokePoints(pts, true);
+      g.fS(color, 1);
+      g.fP(pts, true);
+      g.lS(1, water ? C_waterLo : C_landDark, water ? 0.48 : 0.72);
+      g.sP(pts, true);
 
       // Deterministic micro-texture: short ripples, tiny facets and sparse dither.
       if (water) {
         const ox = (hash % 5) - 2;
         const oy = ((hash * 3) % 5) - 2;
-        g.lineStyle(1, hash & 1 ? 0x31a0aa : 0x0a8494, 0.25 + (hash % 3) * 0.08);
-        g.lineBetween(c.x - 8 + ox, c.y - 2 + oy, c.x - 1 + ox, c.y - 4 + oy);
-        if (hash % 3 === 0) g.lineBetween(c.x + 3, c.y + 3, c.x + 9, c.y + 1);
+        g.lS(1, hash & 1 ? 0x31a0aa : 0x0a8494, 0.25 + (hash % 3) * 0.08);
+        g.lB(c.x - 8 + ox, c.y - 2 + oy, c.x - 1 + ox, c.y - 4 + oy);
+        if (hash % 3 === 0) g.lB(c.x + 3, c.y + 3, c.x + 9, c.y + 1);
         if (hash % 5 === 0) {
-          g.fillStyle(0xa7d8d2, 0.16);
-          g.fillRect(c.x + ox, c.y + oy, 2, 1);
+          g.fS(0xa7d8d2, 0.16);
+          g.fR(c.x + ox, c.y + oy, 2, 1);
         }
       } else {
-        g.lineStyle(1, hash & 1 ? 0x58704b : 0x1d3928, 0.35);
-        g.lineBetween(c.x - 7, c.y + (hash % 4) - 2, c.x - 1, c.y + (hash % 4) - 4);
+        g.lS(1, hash & 1 ? 0x58704b : 0x1d3928, 0.35);
+        g.lB(c.x - 7, c.y + (hash % 4) - 2, c.x - 1, c.y + (hash % 4) - 4);
         if (hash % 4 === 0) {
-          g.fillStyle(0x75553a, 0.3);
+          g.fS(0x75553a, 0.3);
           g.fillTriangle(c.x + 4, c.y - 2, c.x + 9, c.y, c.x + 5, c.y + 2);
         }
       }
       if (t === 4) {
-        g.fillStyle(0x1c2638, 0.38);
-        g.fillCircle(c.x - 3, c.y - 2, 5);
+        g.fS(0x1c2638, 0.38);
+        g.fC(c.x - 3, c.y - 2, 5);
       } else if (t === 6) {
-        g.fillStyle(0x5b9d59, 0.66);
-        g.fillCircle(c.x - 5, c.y, 4);
-        g.fillCircle(c.x + 5, c.y - 2, 3);
+        g.fS(0x5b9d59, 0.66);
+        g.fC(c.x - 5, c.y, 4);
+        g.fC(c.x + 5, c.y - 2, 3);
       } else if (t === 7) {
-        g.fillStyle(0xd58339, 0.92);
-        g.fillCircle(c.x, c.y, 3);
-        g.lineStyle(1, C_bolt, 0.55);
+        g.fS(0xd58339, 0.92);
+        g.fC(c.x, c.y, 3);
+        g.lS(1, C_bolt, 0.55);
         g.strokeCircle(c.x, c.y, 5);
       }
     }
@@ -1094,7 +1094,7 @@ function drawTiles(g) {
 // Carved shoreline: charcoal cut with a restrained sunlit rim.
 function drawShore(g) {
   for (let pass = 0; pass < 3; pass++) {
-    g.lineStyle(pass === 0 ? 5 : pass === 1 ? 2.5 : 1, pass === 0 ? C_ink : pass === 1 ? C_coast : C_white, pass === 2 ? 0.55 : 1);
+    g.lS(pass === 0 ? 5 : pass === 1 ? 2.5 : 1, pass === 0 ? C_ink : pass === 1 ? C_coast : C_white, pass === 2 ? 0.55 : 1);
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
         if (!isLake(x, y)) continue;
@@ -1106,10 +1106,10 @@ function drawShore(g) {
           const [i, j] = EDGE[key];
           const a = pts[i];
           const b = pts[j];
-          if (pass < 2) g.lineBetween(a.x, a.y, b.x, b.y);
+          if (pass < 2) g.lB(a.x, a.y, b.x, b.y);
           else {
-            g.lineBetween(a.x, a.y, a.x + (b.x - a.x) * 0.34, a.y + (b.y - a.y) * 0.34);
-            g.lineBetween(a.x + (b.x - a.x) * 0.56, a.y + (b.y - a.y) * 0.56, b.x, b.y);
+            g.lB(a.x, a.y, a.x + (b.x - a.x) * 0.34, a.y + (b.y - a.y) * 0.34);
+            g.lB(a.x + (b.x - a.x) * 0.56, a.y + (b.y - a.y) * 0.56, b.x, b.y);
           }
         }
       }
@@ -1121,27 +1121,27 @@ function drawHut(g, cx, cy) {
   const hut = (x, y, scale) => {
     const hw = 8 * scale;
     const hh = 4 * scale;
-    g.lineStyle(3 * scale, 0x2a1713, 1);
-    for (const p of rhombus(x, y, hw, hh)) g.lineBetween(p.x, p.y, p.x, p.y - 10 * scale);
-    g.fillStyle(0x02070a, 0.45);
-    g.fillPoints(rhombus(x + 5, y + 4, hw + 3, hh + 2), true);
+    g.lS(3 * scale, 0x2a1713, 1);
+    for (const p of rhombus(x, y, hw, hh)) g.lB(p.x, p.y, p.x, p.y - 10 * scale);
+    g.fS(0x02070a, 0.45);
+    g.fP(rhombus(x + 5, y + 4, hw + 3, hh + 2), true);
     const base = y - 10 * scale;
     drawPrism(g, x, base, hw, hh, 8 * scale, C_rust, C_wood, 0x3d241f);
     const roof = rhombus(x, base - 8 * scale, hw + 4, hh + 3);
     const apex = { x: x - 2, y: base - 21 * scale };
-    g.fillStyle(0xd4774a, 1);
-    g.fillPoints([roof[3], roof[2], apex], true);
-    g.fillStyle(0x783c32, 1);
-    g.fillPoints([roof[2], roof[1], apex], true);
-    g.lineStyle(1.5, C_ink, 1);
-    g.strokePoints([roof[3], apex, roof[1], roof[2]], true);
-    g.fillStyle(0xffc76a, 0.75);
-    g.fillRect(x - 2, base - 6 * scale, 4, 3);
+    g.fS(0xd4774a, 1);
+    g.fP([roof[3], roof[2], apex], true);
+    g.fS(0x783c32, 1);
+    g.fP([roof[2], roof[1], apex], true);
+    g.lS(1.5, C_ink, 1);
+    g.sP([roof[3], apex, roof[1], roof[2]], true);
+    g.fS(0xffc76a, 0.75);
+    g.fR(x - 2, base - 6 * scale, 4, 3);
   };
   hut(cx - 6, cy, 1);
   hut(cx + 13, cy + 2, 0.72);
-  g.lineStyle(2, 0x3d2a21, 1);
-  g.lineBetween(cx - 12, cy - 7, cx + 19, cy - 3);
+  g.lS(2, 0x3d2a21, 1);
+  g.lB(cx - 12, cy - 7, cx + 19, cy - 3);
 }
 
 // Solid cable-stayed Puente General Rafael Urdaneta across the northern strait.
@@ -1162,25 +1162,25 @@ function drawBridge(g) {
       { x: a.x + nx, y: a.y + ny - DECK_H }, { x: b.x + nx, y: b.y + ny - DECK_H },
       { x: b.x - nx, y: b.y - ny - DECK_H }, { x: a.x - nx, y: a.y - ny - DECK_H },
     ];
-    g.fillStyle(0x02070b, 0.5);
-    g.fillPoints(deck.map((p) => ({ x: p.x + 8, y: p.y + 11 })), true);
-    g.fillStyle(0x46545b, 1);
-    g.fillPoints([deck[1], deck[2], { x: deck[2].x, y: deck[2].y + 7 }, { x: deck[1].x, y: deck[1].y + 7 }], true);
-    g.fillStyle(C_concrete, 1);
-    g.fillPoints(deck, true);
-    g.lineStyle(2, C_ink, 1);
-    g.strokePoints(deck, true);
-    g.lineStyle(1, 0xf2e7c5, 0.85);
-    g.lineBetween(a.x, a.y - DECK_H, b.x, b.y - DECK_H);
+    g.fS(0x02070b, 0.5);
+    g.fP(deck.map((p) => ({ x: p.x + 8, y: p.y + 11 })), true);
+    g.fS(0x46545b, 1);
+    g.fP([deck[1], deck[2], { x: deck[2].x, y: deck[2].y + 7 }, { x: deck[1].x, y: deck[1].y + 7 }], true);
+    g.fS(C_concrete, 1);
+    g.fP(deck, true);
+    g.lS(2, C_ink, 1);
+    g.sP(deck, true);
+    g.lS(1, 0xf2e7c5, 0.85);
+    g.lB(a.x, a.y - DECK_H, b.x, b.y - DECK_H);
   }
 
   for (const x of xs) {
     if (tileAt(x, row) !== 2) continue;
     const t = toIso(x, row);
-    g.fillStyle(0x26363d, 0.7);
-    g.fillPoints([{ x: t.x - 5, y: t.y + 2 }, { x: t.x + 2, y: t.y - 1 }, { x: t.x + 4, y: t.y + 21 }, { x: t.x - 3, y: t.y + 23 }], true);
-    g.lineStyle(1.5, C_ink, 1);
-    g.strokePoints([{ x: t.x - 5, y: t.y + 2 }, { x: t.x + 2, y: t.y - 1 }, { x: t.x + 4, y: t.y + 21 }, { x: t.x - 3, y: t.y + 23 }], true);
+    g.fS(0x26363d, 0.7);
+    g.fP([{ x: t.x - 5, y: t.y + 2 }, { x: t.x + 2, y: t.y - 1 }, { x: t.x + 4, y: t.y + 21 }, { x: t.x - 3, y: t.y + 23 }], true);
+    g.lS(1.5, C_ink, 1);
+    g.sP([{ x: t.x - 5, y: t.y + 2 }, { x: t.x + 2, y: t.y - 1 }, { x: t.x + 4, y: t.y + 21 }, { x: t.x - 3, y: t.y + 23 }], true);
   }
   for (const x of [xs[0], xs[xs.length - 1]]) {
     if (tileAt(x, row) !== 2) continue;
@@ -1188,31 +1188,31 @@ function drawBridge(g) {
     const deckY = t.y - DECK_H;
     const topY = deckY - TOWER_H;
     // Distinct A-frame pylon, cross braces and bright stay cables.
-    g.lineStyle(7, 0x596970, 1);
-    g.lineBetween(t.x - 9, deckY + 2, t.x, topY);
-    g.lineBetween(t.x + 9, deckY + 2, t.x, topY);
-    g.lineStyle(3, C_concrete, 1);
-    g.lineBetween(t.x - 8, deckY, t.x, topY);
-    g.lineBetween(t.x + 8, deckY, t.x, topY);
-    g.lineBetween(t.x - 5, topY + 22, t.x + 5, topY + 22);
-    g.lineStyle(1.4, 0xf7f2db, 0.92);
+    g.lS(7, 0x596970, 1);
+    g.lB(t.x - 9, deckY + 2, t.x, topY);
+    g.lB(t.x + 9, deckY + 2, t.x, topY);
+    g.lS(3, C_concrete, 1);
+    g.lB(t.x - 8, deckY, t.x, topY);
+    g.lB(t.x + 8, deckY, t.x, topY);
+    g.lB(t.x - 5, topY + 22, t.x + 5, topY + 22);
+    g.lS(1.4, 0xf7f2db, 0.92);
     for (let k = 1; k <= 4; k++) {
       const off = (k * TW) / 5;
-      g.lineBetween(t.x, topY + 3, t.x - off, deckY + off / 2);
-      g.lineBetween(t.x, topY + 3, t.x + off, deckY - off / 2);
+      g.lB(t.x, topY + 3, t.x - off, deckY + off / 2);
+      g.lB(t.x, topY + 3, t.x + off, deckY - off / 2);
     }
-    g.fillStyle(C_bolt, 0.9);
-    g.fillCircle(t.x, topY, 2);
+    g.fS(C_bolt, 0.9);
+    g.fC(t.x, topY, 2);
   }
 }
 
 function drawCatatumboLandmark(g) {
   const c = toIso(4, 16);
-  g.fillStyle(0x172235, 0.82);
-  g.fillCircle(c.x - 9, c.y - 22, 9);
-  g.fillCircle(c.x + 3, c.y - 27, 12);
-  g.fillCircle(c.x + 15, c.y - 21, 8);
-  g.fillStyle(0x263a50, 0.65);
+  g.fS(0x172235, 0.82);
+  g.fC(c.x - 9, c.y - 22, 9);
+  g.fC(c.x + 3, c.y - 27, 12);
+  g.fC(c.x + 15, c.y - 21, 8);
+  g.fS(0x263a50, 0.65);
   g.fillEllipse(c.x + 2, c.y - 19, 40, 13);
 }
 
@@ -1236,14 +1236,14 @@ function drawMap(g) {
 }
 
 function drawBackground(g) {
-  g.fillStyle(C_bg, 1);
-  g.fillRect(0, 0, WORLD_W, WORLD_H);
-  g.fillStyle(0x0b1b27, 1);
-  g.fillRect(0, 0, WORLD_W, 390);
-  g.fillStyle(0x102633, 1);
-  g.fillPoints([{ x: 0, y: 300 }, { x: 220, y: 220 }, { x: 430, y: 290 }, { x: 650, y: 200 }, { x: 900, y: 285 }, { x: WORLD_W, y: 220 }, { x: WORLD_W, y: 430 }, { x: 0, y: 430 }], true);
-  g.fillStyle(0x040a10, 1);
-  g.fillRect(0, 650, WORLD_W, 90);
+  g.fS(C_bg, 1);
+  g.fR(0, 0, WORLD_W, WORLD_H);
+  g.fS(0x0b1b27, 1);
+  g.fR(0, 0, WORLD_W, 390);
+  g.fS(0x102633, 1);
+  g.fP([{ x: 0, y: 300 }, { x: 220, y: 220 }, { x: 430, y: 290 }, { x: 650, y: 200 }, { x: 900, y: 285 }, { x: WORLD_W, y: 220 }, { x: WORLD_W, y: 430 }, { x: 0, y: 430 }], true);
+  g.fS(0x040a10, 1);
+  g.fR(0, 650, WORLD_W, 90);
 }
 
 // Screen vector from a cell centre to its neighbour in a grid direction.
@@ -1258,7 +1258,7 @@ const STICK_ARROW = { U: [0, -1], R: [1, 0], D: [0, 1], L: [-1, 0] };
 function drawArrow(g, cx, cy, stick, color) {
   const [ax, ay] = STICK_ARROW[stick];
   const s = 5;
-  g.fillStyle(color, 0.9);
+  g.fS(color, 0.9);
   g.fillTriangle(
     cx + ax * s,
     cy + ay * s,
@@ -1271,10 +1271,10 @@ function drawArrow(g, cx, cy, stick, color) {
 
 function drawCell(g, x, y, color, fillAlpha, lineAlpha) {
   const pts = cellPts(x, y);
-  g.fillStyle(color, fillAlpha);
-  g.fillPoints(pts, true);
-  g.lineStyle(2, color, lineAlpha);
-  g.strokePoints(pts, true);
+  g.fS(color, fillAlpha);
+  g.fP(pts, true);
+  g.lS(2, color, lineAlpha);
+  g.sP(pts, true);
 }
 
 // Shared 18-piece volumetric model: x=lateral, y=height, z=front.
@@ -1345,7 +1345,7 @@ function drawMecha(g, gx, gy, facing, color, alpha, flash, stance, pose = 'idle'
     return [wx, y, wz, Math.round(sx / snap) * snap, Math.round(sy / snap) * snap];
   };
   const P = (i, x, y, z) => project(...part(i, x, y, z));
-  g.fillStyle(0x010509, 0.7 * alpha);
+  g.fS(0x010509, 0.7 * alpha);
   g.fillEllipse(c.x + 4, c.y + 5, pose === 'move' ? 34 : 48, pose === 'move' ? 8 : 14);
   const faces = [];
   for (let pi = 0; pi < MECH_MODEL.length; pi++) {
@@ -1367,24 +1367,24 @@ function drawMecha(g, gx, gy, facing, color, alpha, flash, stance, pose = 'idle'
   }
   faces.sort((a, b) => a.d - b.d);
   for (const f of faces) {
-    g.fillStyle(f.c, alpha); g.fillPoints(f.p, true);
-    g.lineStyle(1.35, C_ink, alpha * 0.9); g.strokePoints(f.p, true);
+    g.fS(f.c, alpha); g.fP(f.p, true);
+    g.lS(1.35, C_ink, alpha * 0.9); g.sP(f.p, true);
   }
   const energy = flash ? C_white : pal[3];
   if (pose === 'move') for (const x of [-7, 7]) {
     const a = P(9, x, 49, -11), b = P(9, x, 46, -34 - frame * 6);
-    g.lineStyle(10, C_ink, alpha); g.lineBetween(a[3], a[4], b[3], b[4]);
-    g.lineStyle(6, energy, alpha); g.lineBetween(a[3], a[4], b[3], b[4]);
-    g.lineStyle(2, C_white, alpha); g.lineBetween(a[3], a[4], b[3], b[4]);
+    g.lS(10, C_ink, alpha); g.lB(a[3], a[4], b[3], b[4]);
+    g.lS(6, energy, alpha); g.lB(a[3], a[4], b[3], b[4]);
+    g.lS(2, C_white, alpha); g.lB(a[3], a[4], b[3], b[4]);
   }
   // Visor is permanent; the energy blade exists only during an attack pose.
   const va = P(16, -5, 64, 7.3), vb = P(16, 5, 64, 7.3);
-  g.lineStyle(4, C_ink, alpha); g.lineBetween(va[3], va[4], vb[3], vb[4]);
-  g.lineStyle(2.5, energy, alpha); g.lineBetween(va[3], va[4], vb[3], vb[4]);
+  g.lS(4, C_ink, alpha); g.lB(va[3], va[4], vb[3], vb[4]);
+  g.lS(2.5, energy, alpha); g.lB(va[3], va[4], vb[3], vb[4]);
   if (blade) {
     const sa = P(17, 18, 31, 3), sb = P(17, 18, 31, 28);
-    g.lineStyle(3, energy, alpha); g.lineBetween(sa[3], sa[4], sb[3], sb[4]);
-    g.lineStyle(1, C_white, alpha); g.lineBetween(sa[3], sa[4], sb[3], sb[4]);
+    g.lS(3, energy, alpha); g.lB(sa[3], sa[4], sb[3], sb[4]);
+    g.lS(1, C_white, alpha); g.lB(sa[3], sa[4], sb[3], sb[4]);
   }
 }
 
@@ -1392,22 +1392,22 @@ function drawMecha(g, gx, gy, facing, color, alpha, flash, stance, pose = 'idle'
 function drawLabelSlab(g, x, y, w, h, color, selected) {
   const cut = Math.min(12, h * 0.35);
   const pts = [{ x: x + cut, y }, { x: x + w, y }, { x: x + w - cut, y: y + h }, { x, y: y + h }, { x: x + 5, y: y + 5 }];
-  g.fillStyle(0x04090f, 0.94);
-  g.fillPoints(pts.map((p) => ({ x: p.x + 3, y: p.y + 4 })), true);
-  g.fillStyle(selected ? 0x142d38 : 0x0d1720, 0.96);
-  g.fillPoints(pts, true);
-  g.lineStyle(selected ? 2.5 : 1.2, selected ? color : 0x50616a, selected ? 1 : 0.72);
-  g.strokePoints(pts, true);
-  g.lineStyle(selected ? 4 : 2, color, selected ? 1 : 0.5);
-  g.lineBetween(x + cut, y, x + Math.min(w * 0.42, 78), y);
+  g.fS(0x04090f, 0.94);
+  g.fP(pts.map((p) => ({ x: p.x + 3, y: p.y + 4 })), true);
+  g.fS(selected ? 0x142d38 : 0x0d1720, 0.96);
+  g.fP(pts, true);
+  g.lS(selected ? 2.5 : 1.2, selected ? color : 0x50616a, selected ? 1 : 0.72);
+  g.sP(pts, true);
+  g.lS(selected ? 4 : 2, color, selected ? 1 : 0.5);
+  g.lB(x + cut, y, x + Math.min(w * 0.42, 78), y);
 }
 
 function drawBolt(g, fx) {
   const life = (fx.until - fx.now) / fx.dur;
-  g.lineStyle(3, C_bolt, life);
-  g.strokePoints(fx.pts, false);
-  g.lineStyle(1, C_white, life);
-  g.strokePoints(fx.pts, false);
+  g.lS(3, C_bolt, life);
+  g.sP(fx.pts, false);
+  g.lS(1, C_white, life);
+  g.sP(fx.pts, false);
 }
 
 function makeBoltPoints(x, y) {
@@ -1425,21 +1425,21 @@ const unitColor = (i) => (i ? C_cpu : C_p1);
 
 // "Locked in" check mark above a unit.
 function drawCheck(g, x, y, color) {
-  g.fillStyle(0x000000, 0.85);
-  g.fillCircle(x, y, 9);
-  g.lineStyle(2, color, 1);
+  g.fS(0x000000, 0.85);
+  g.fC(x, y, 9);
+  g.lS(2, color, 1);
   g.strokeCircle(x, y, 9);
-  g.lineStyle(2.5, C_white, 1);
-  g.lineBetween(x - 4, y, x - 1, y + 4);
-  g.lineBetween(x - 1, y + 4, x + 5, y - 4);
+  g.lS(2.5, C_white, 1);
+  g.lB(x - 4, y, x - 1, y + 4);
+  g.lB(x - 1, y + 4, x + 5, y - 4);
 }
 
 // Small HP bar under a unit.
 function drawMiniBar(g, x, y, frac, color) {
-  g.fillStyle(0x000000, 0.8);
-  g.fillRect(x - 21, y, 42, 5);
-  g.fillStyle(color, 1);
-  g.fillRect(x - 20, y + 1, 40 * Math.max(0, frac), 3);
+  g.fS(0x000000, 0.8);
+  g.fR(x - 21, y, 42, 5);
+  g.fS(color, 1);
+  g.fR(x - 20, y + 1, 40 * Math.max(0, frac), 3);
 }
 
 // The two vertices of the front tile that run across the facing direction (blade streak / shield).
@@ -1471,29 +1471,29 @@ function drawSweep(g, gx, gy, facing, color, a, kind) {
     { x: c.x + v.x * 1.55, y: c.y + v.y * 1.55 - 26 },
     { x: c.x + v.x * 3, y: c.y + v.y * 3 - 10 },
   ];
-  g.lineStyle(12, C_ink, 0.72 * a);
-  g.strokePoints(arc, false);
-  g.lineStyle(7, color, 0.7 * a);
-  g.strokePoints(arc, false);
-  g.lineStyle(2.5, C_white, a);
-  g.strokePoints(arc, false);
+  g.lS(12, C_ink, 0.72 * a);
+  g.sP(arc, false);
+  g.lS(7, color, 0.7 * a);
+  g.sP(arc, false);
+  g.lS(2.5, C_white, a);
+  g.sP(arc, false);
   const q = arc[2];
-  g.fillStyle(C_white, a);
+  g.fS(C_white, a);
   g.fillTriangle(q.x, q.y, q.x - 7, q.y - 5, q.x - 2, q.y + 6);
 }
 
 function drawGuard(g, gx, gy, facing, a) {
   const [p, q] = frontEdge(gx, gy, facing, 0.52);
   const shield = [{ x: p.x, y: p.y - 7 }, { x: q.x, y: q.y - 7 }, { x: q.x + 3, y: q.y - 28 }, { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 - 38 }, { x: p.x - 3, y: p.y - 28 }];
-  g.fillStyle(0x143c54, 0.38 * a);
-  g.fillPoints(shield, true);
-  g.lineStyle(7, C_ink, 0.8 * a);
-  g.strokePoints(shield, false);
-  g.lineStyle(3, C_p1, a);
-  g.strokePoints(shield, false);
-  g.lineStyle(1.5, C_white, 0.9 * a);
-  g.lineBetween(shield[0].x + 3, shield[0].y - 3, shield[3].x, shield[3].y + 5);
-  g.lineBetween(shield[3].x, shield[3].y + 5, shield[1].x - 3, shield[1].y - 3);
+  g.fS(0x143c54, 0.38 * a);
+  g.fP(shield, true);
+  g.lS(7, C_ink, 0.8 * a);
+  g.sP(shield, false);
+  g.lS(3, C_p1, a);
+  g.sP(shield, false);
+  g.lS(1.5, C_white, 0.9 * a);
+  g.lB(shield[0].x + 3, shield[0].y - 3, shield[3].x, shield[3].y + 5);
+  g.lB(shield[3].x, shield[3].y + 5, shield[1].x - 3, shield[1].y - 3);
 }
 
 function drawShards(g, x, y, color, a) {
@@ -1502,9 +1502,9 @@ function drawShards(g, x, y, color, a) {
     const r = 19 + (k % 3) * 9;
     const sx = x + Math.cos(ang) * r;
     const sy = y + Math.sin(ang) * r * 0.65;
-    g.lineStyle(2, k & 1 ? color : C_white, a * 0.7);
-    g.lineBetween(x, y, sx, sy);
-    g.fillStyle(k & 1 ? color : C_white, a * (0.55 + (k % 2) * 0.35));
+    g.lS(2, k & 1 ? color : C_white, a * 0.7);
+    g.lB(x, y, sx, sy);
+    g.fS(k & 1 ? color : C_white, a * (0.55 + (k % 2) * 0.35));
     g.fillTriangle(sx, sy, sx - Math.cos(ang + 0.7) * 9, sy - Math.sin(ang + 0.7) * 6, sx - Math.cos(ang - 0.5) * 4, sy - Math.sin(ang - 0.5) * 4);
   }
 }
@@ -1585,6 +1585,10 @@ const config = {
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   scene: { create, update },
 };
+
+// Short aliases for hot Graphics methods: property names survive minification (~1.4KB saved).
+const GP = Phaser.GameObjects.Graphics.prototype;
+for (const [k, v] of Object.entries({ fillStyle: 'fS', lineStyle: 'lS', lineBetween: 'lB', strokePoints: 'sP', fillPoints: 'fP', fillRect: 'fR', fillCircle: 'fC' })) GP[v] = GP[k];
 
 new Phaser.Game(config);
 
@@ -2252,8 +2256,8 @@ function drawWorld(s, time, delta) {
       const zone = ZONE_TILES[tileAt(x, y)];
       if (!zone) continue;
       const pulse = zone === 'cat' ? flicker : 0.07 + 0.06 * Math.sin(time / 250 + x + y);
-      g.fillStyle(ZONE_COLOR[zone], pulse);
-      g.fillPoints(cellPts(x, y), true);
+      g.fS(ZONE_COLOR[zone], pulse);
+      g.fP(cellPts(x, y), true);
     }
   }
 
@@ -2273,8 +2277,8 @@ function drawWorld(s, time, delta) {
       }
       const path = sel.valid.get(sel.cur.x + ',' + sel.cur.y);
       if (path) {
-        g.lineStyle(2, C_white, 0.8);
-        g.strokePoints([me, ...path].map((c) => toIso(c.x, c.y)), false);
+        g.lS(2, C_white, 0.8);
+        g.sP([me, ...path].map((c) => toIso(c.x, c.y)), false);
       }
       drawCell(g, sel.cur.x, sel.cur.y, C_white, 0.15 + 0.15 * blink, 1);
     }
@@ -2341,10 +2345,10 @@ function drawWorld(s, time, delta) {
   if (play) {
     const p = toIso(s.view[1].gx, s.view[1].gy);
     const r = 27 + blink * 3;
-    gt.lineStyle(2, C_cpu, 0.4 + blink * 0.5);
+    gt.lS(2, C_cpu, 0.4 + blink * 0.5);
     gt.strokeCircle(p.x, p.y - 30, r);
-    gt.lineBetween(p.x - r - 7, p.y - 30, p.x - r + 5, p.y - 30);
-    gt.lineBetween(p.x + r - 5, p.y - 30, p.x + r + 7, p.y - 30);
+    gt.lB(p.x - r - 7, p.y - 30, p.x - r + 5, p.y - 30);
+    gt.lB(p.x + r - 5, p.y - 30, p.x + r + 7, p.y - 30);
   }
   s.fx = s.fx.filter((f) => f.until > time);
   for (const f of s.fx) {
@@ -2355,8 +2359,8 @@ function drawWorld(s, time, delta) {
     else if (f.kind === 'guard') drawGuard(gt, s.view[f.who].gx, s.view[f.who].gy, s.view[f.who].facing, a);
     else if (f.kind === 'shards') drawShards(gt, f.x, f.y, f.color, a);
     else if (f.kind === 'flash') {
-      gt.fillStyle(f.color || C_white, 0.35 * a);
-      gt.fillRect(0, 0, W, H);
+      gt.fS(f.color || C_white, 0.35 * a);
+      gt.fR(0, 0, W, H);
     }
   }
 }
@@ -2368,7 +2372,7 @@ function drawHud(s, time) {
   const units = s.state.units;
   const play = s.mode === 'play';
   const arc = (x, y, r, a, b, color, width, alpha = 1) => {
-    g.lineStyle(width, color, alpha);
+    g.lS(width, color, alpha);
     g.beginPath();
     g.arc(x, y, r, a, b, false);
     g.strokePath();
@@ -2383,20 +2387,20 @@ function drawHud(s, time) {
     const bx = x0 + 12;
     const bw = 198;
     const hp = Math.max(0, s.dispHp[i]) / HP_MAX;
-    g.fillStyle(0x02070c, 1);
-    g.fillRect(bx, 34, bw, 11);
-    g.fillStyle(color, 0.95);
-    if (i) g.fillRect(bx + bw * (1 - hp), 35, bw * hp, 9);
-    else g.fillRect(bx, 35, bw * hp, 9);
-    g.lineStyle(1, C_ink, 0.9);
-    for (let k = 1; k < 10; k++) g.lineBetween(bx + (bw * k) / 10, 35, bx + (bw * k) / 10, 44);
+    g.fS(0x02070c, 1);
+    g.fR(bx, 34, bw, 11);
+    g.fS(color, 0.95);
+    if (i) g.fR(bx + bw * (1 - hp), 35, bw * hp, 9);
+    else g.fR(bx, 35, bw * hp, 9);
+    g.lS(1, C_ink, 0.9);
+    for (let k = 1; k < 10; k++) g.lB(bx + (bw * k) / 10, 35, bx + (bw * k) / 10, 44);
     // GUTS meter, filling toward the centre like the HP rail.
     const gx = i ? x0 + 150 : x0 + 12;
     const gw = (60 * u.guts) / GUTS_MAX;
-    g.fillStyle(0x02070c, 1);
-    g.fillRect(gx, 52, 60, 7);
-    g.fillStyle(C_bolt, 1);
-    g.fillRect(i ? gx + 60 - gw : gx, 53, gw, 5);
+    g.fS(0x02070c, 1);
+    g.fR(gx, 52, 60, 7);
+    g.fS(C_bolt, 1);
+    g.fR(i ? gx + 60 - gw : gx, 53, gw, 5);
     ui.names[i].setPosition(i ? W - 28 : 28, 21);
     ui.status[i].setPosition(i ? W - 84 : 84, 57);
     setT(ui.names[i], (i ? 'CPU CABIMAS' : 'P1 MARACAIBO') + ' // HP ' + Math.max(0, s.dispHp[i]));
@@ -2482,12 +2486,12 @@ function drawHud(s, time) {
       const card = side > 0
         ? [{ x: x + cut, y }, { x: x + w, y: y + 4 }, { x: x + w - 12, y: y + 38 }, { x, y: y + 34 }]
         : [{ x, y: y + 4 }, { x: x + w - cut, y }, { x: x + w, y: y + 34 }, { x: x + 12, y: y + 38 }];
-      g.fillStyle(0x010308, 0.97);
-      g.fillPoints(card, true);
-      g.lineStyle(4, C_cpu, 1);
-      g.strokePoints(card, true);
-      g.lineStyle(1.5, 0xff91a9, 0.8);
-      g.lineBetween(x + 15, y + 32, x + 113, y + 35);
+      g.fS(0x010308, 0.97);
+      g.fP(card, true);
+      g.lS(4, C_cpu, 1);
+      g.sP(card, true);
+      g.lS(1.5, 0xff91a9, 0.8);
+      g.lB(x + 15, y + 32, x + 113, y + 35);
       items.push({ kind: 'clash', x: x + 76, y: y + 18, label: name });
       items.push({ kind: 'key', x: x + 137, y: y + 20, label: 'B' + (k + 1) });
     });
@@ -2507,10 +2511,10 @@ function drawHud(s, time) {
 
   // Cohesive lower phase rail and time pressure meter.
   if (play && phase) {
-    g.fillStyle(0x03080e, 0.9);
-    g.fillPoints([{ x: 0, y: 530 }, { x: 145, y: 530 }, { x: 165, y: 538 }, { x: 635, y: 538 }, { x: 655, y: 530 }, { x: W, y: 530 }, { x: W, y: H }, { x: 0, y: H }], true);
-    g.lineStyle(2, s.phase === 'clash' ? C_cpu : C_p1, 0.75);
-    g.lineBetween(145, 530, 655, 530);
+    g.fS(0x03080e, 0.9);
+    g.fP([{ x: 0, y: 530 }, { x: 145, y: 530 }, { x: 165, y: 538 }, { x: 635, y: 538 }, { x: 655, y: 530 }, { x: W, y: 530 }, { x: W, y: H }, { x: 0, y: H }], true);
+    g.lS(2, s.phase === 'clash' ? C_cpu : C_p1, 0.75);
+    g.lB(145, 530, 655, 530);
   }
   if (play && ['choose', 'aim', 'clash', 'throw'].includes(s.phase)) {
     const total = s.phase === 'clash' || s.phase === 'throw' ? CLASH_MS : TURN_MS;
@@ -2518,10 +2522,10 @@ function drawHud(s, time) {
     const barW = 430;
     const barX = W / 2 - barW / 2;
     const barColor = left > 0.5 ? C_p1 : left > 0.25 ? C_bolt : C_cpu;
-    g.fillStyle(0x17232c, 1);
-    g.fillRect(barX, H - 11, barW, 5);
-    g.fillStyle(barColor, 1);
-    g.fillRect(barX, H - 11, barW * left, 5);
+    g.fS(0x17232c, 1);
+    g.fR(barX, H - 11, barW, 5);
+    g.fS(barColor, 1);
+    g.fR(barX, H - 11, barW * left, 5);
   }
 
   // Attract/game-over title treatment: one decisive plate, no generic modal stack.
@@ -2542,10 +2546,10 @@ function drawHud(s, time) {
   if (title) {
     drawLabelSlab(g, W / 2 - 222, 112, 444, 52, titleColor, true);
     const lines = sub.split('\n').length;
-    g.fillStyle(0x03070d, 0.88);
-    g.fillPoints([{ x: 215, y: 174 }, { x: 585, y: 174 }, { x: 568, y: 186 + lines * 16 }, { x: 232, y: 186 + lines * 16 }], true);
-    g.lineStyle(2, titleColor, 0.55);
-    g.lineBetween(250, 174, 550, 174);
+    g.fS(0x03070d, 0.88);
+    g.fP([{ x: 215, y: 174 }, { x: 585, y: 174 }, { x: 568, y: 186 + lines * 16 }, { x: 232, y: 186 + lines * 16 }], true);
+    g.lS(2, titleColor, 0.55);
+    g.lB(250, 174, 550, 174);
     ui.sub.setY(180 + (lines * 16) / 2);
   }
   setT(ui.title, title);
