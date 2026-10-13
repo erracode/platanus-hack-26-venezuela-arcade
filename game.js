@@ -1298,20 +1298,20 @@ const drawCell = (g, x, y, color, fillAlpha, lineAlpha) => {
 // Temjin-like silhouette: big angular shoulders, slim waist, white limbs, heavy boots, V antennae.
 // Materials: 0 dark joint, 1 team armour, 2 white, 3 energy, 4 orange trim.
 const MECH_MODEL = [
-  [-7, 4, 4, 14, 8, 18, 0.78, 0.7, 1], [7, 4, 4, 14, 8, 18, 0.78, 0.7, 1],
-  [-7, 15, 0, 9, 15, 9, 0.8, 0.85, 2], [7, 15, 0, 9, 15, 9, 0.8, 0.85, 2],
-  [-6, 28, 0, 9, 11, 9, 0.85, 0.8, 2], [6, 28, 0, 9, 11, 9, 0.85, 0.8, 2],
-  [0, 36, 0, 16, 7, 9, 0.8, 0.8, 0],
-  [0, 48, 0, 26, 16, 13, 0.7, 0.75, 1], [0, 46, 6, 14, 9, 4, 0.7, 0.7, 0],
-  [0, 49, -8, 19, 18, 6, 0.8, 0.82, 0],
-  [-20, 53, 0, 17, 12, 17, 0.72, 0.68, 1], [20, 53, 0, 17, 12, 17, 0.72, 0.68, 1],
-  [-18, 44, 0, 7, 10, 7, 0.8, 0.8, 0], [18, 44, 0, 7, 10, 7, 0.8, 0.8, 0],
-  [-18, 34, 2, 10, 12, 10, 0.75, 0.8, 2], [18, 34, 2, 10, 12, 10, 0.75, 0.8, 2],
-  [0, 66, 1, 11, 9, 10, 0.7, 0.75, 2],
-  [18, 31, 22, 3, 4, 40, 0.5, 0.9, 2],
-  [-30, 54, 0, 6, 9, 12, 0.4, 0.6, 4], [30, 54, 0, 6, 9, 12, 0.4, 0.6, 4],
-  [-3, 75, 0, 2, 11, 2, 0.3, 0.3, 2], [3, 75, 0, 2, 11, 2, 0.3, 0.3, 2],
-  [-6, 25, 5, 4, 4, 2, 1, 1, 3], [6, 25, 5, 4, 4, 2, 1, 1, 3],
+  [-6, 4, 4, 11, 8, 17, 0.75, 0.7, 1], [6, 4, 4, 11, 8, 17, 0.75, 0.7, 1],
+  [-6, 16, 0, 7, 16, 8, 0.8, 0.85, 2], [6, 16, 0, 7, 16, 8, 0.8, 0.85, 2],
+  [-5, 31, 0, 7, 14, 8, 0.9, 0.8, 2], [5, 31, 0, 7, 14, 8, 0.9, 0.8, 2],
+  [0, 40, 0, 12, 6, 8, 0.8, 0.8, 0],
+  [0, 52, 0, 21, 15, 12, 0.72, 0.75, 1], [0, 49, 6, 10, 8, 3, 0.7, 0.7, 0],
+  [0, 52, -7, 15, 16, 5, 0.8, 0.8, 0],
+  [-17, 57, 0, 13, 9, 15, 0.65, 0.6, 1], [17, 57, 0, 13, 9, 15, 0.65, 0.6, 1],
+  [-17, 48, 0, 5, 9, 5, 0.8, 0.8, 0], [17, 48, 0, 5, 9, 5, 0.8, 0.8, 0],
+  [-17, 38, 2, 7, 11, 8, 0.75, 0.8, 2], [17, 38, 2, 7, 11, 8, 0.75, 0.8, 2],
+  [0, 67, 1, 9, 8, 9, 0.7, 0.75, 2],
+  [18, 31, 22, 2, 3, 40, 0.5, 0.9, 2],
+  [-25, 57, 0, 5, 8, 11, 0.4, 0.6, 4], [25, 57, 0, 5, 8, 11, 0.4, 0.6, 4],
+  [-2.5, 76, 0, 1.5, 10, 1.5, 0.3, 0.3, 2], [2.5, 76, 0, 1.5, 10, 1.5, 0.3, 0.3, 2],
+  [-5, 30, 4.2, 3, 4, 1, 1, 1, 3], [5, 30, 4.2, 3, 4, 1, 1, 1, 3],
 ];
 const MECH_FACES = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]];
 const MECH_PALS = [[0x1d3a42, 0x3046d0, 0xe4eaec, 0x3dff9c, 0xff8a1e], [0x1d3a3a, 0xd8232f, 0xe4eaec, 0x3dff9c, 0xff8a1e]];
@@ -1328,8 +1328,9 @@ const mechTone = (c, k, flash) => {
 // Tiny orthographic software renderer: transform, pose, back-face cull, light and painter-sort.
 const drawMecha = (g, gx, gy, fc, color, alpha, flash, stance, pose = 'idle', frame = 0, wire = 0) => {
   const c = toIso(gx, gy), d = DIRS[fc], pal = MECH_PALS[color === C_cpu ? 1 : 0];
-  const st = stance || 0, tilt = st === ST_STAGGERED ? -0.15 : st === ST_KNOCKBACK ? 0.17 : 0;
+  const st = stance || 0, tilt = st === ST_STAGGERED ? -0.15 : st === ST_KNOCKBACK ? 0.17 : st === ST_DOWN ? -1.5 : 0;
   const sn = M_sin(tilt), co = M_cos(tilt), down = st === ST_DOWN;
+  if (down) pose = 'idle';
   const lift = pose === 'move' ? [4, 12, 3][frame] : 0;
   const blade = pose === 'hslash'
     ? [[[20, 35, -2], [34, 43, -24]], [[-27, 43, 13], [31, 43, 17]], [[16, 36, 2], [-31, 39, -14]]][frame]
@@ -1339,7 +1340,7 @@ const drawMecha = (g, gx, gy, fc, color, alpha, flash, stance, pose = 'idle', fr
   const part = (i, x, y, z) => {
     if (pose === 'move') {
       const leg = i < 6 || i > 21, arm = (i > 11 && i < 16) || i === 17;
-      const pivot = leg ? 36 : arm ? 53 : 36;
+      const pivot = leg ? 40 : arm ? 57 : 40;
       const a = leg ? [0.16, 0.42, 0.2][frame] + (i & 1) * 0.04 : arm ? 0.52 : [0.12, 0.3, 0.16][frame];
       const yy = y - pivot, si = M_sin(a), cs = M_cos(a);
       y = pivot + yy * cs - z * si + lift;
@@ -1358,11 +1359,10 @@ const drawMecha = (g, gx, gy, fc, color, alpha, flash, stance, pose = 'idle', fr
   };
   const snap = pose === 'idle' ? 2 : 3;
   const project = (x, y, z) => {
-    const oy = y;
-    if (down) { y *= 0.5; z += oy * 0.08; }
-    else [y, z] = [y * co - z * sn, y * sn + z * co];
+    // DOWN lies on its back: lifted off the floor and slid forward so it stays on its tile.
+    [y, z] = [y * co - z * sn + (down ? 9 : 0), y * sn + z * co + (down ? 36 : 0)];
     const wx = z * d.dx - x * d.dy, wz = z * d.dy + x * d.dx;
-    const sx = c.x + (wx + wz) * 0.82, sy = c.y + (wz - wx) * 0.42 - y * 1.06 + (down ? 8 : 0);
+    const sx = c.x + (wx + wz) * 0.82, sy = c.y + (wz - wx) * 0.42 - y * 1.06;
     return [wx, y, wz, M_round(sx / snap) * snap, M_round(sy / snap) * snap];
   };
   const P = (i, x, y, z) => project(...part(i, x, y, z));
@@ -1393,13 +1393,13 @@ const drawMecha = (g, gx, gy, fc, color, alpha, flash, stance, pose = 'idle', fr
   }
   const energy = flash ? C_white : pal[3];
   if (pose === 'move') for (const x of [-7, 7]) {
-    const a = P(9, x, 49, -11), b = P(9, x, 46, -34 - frame * 6);
+    const a = P(9, x, 52, -10), b = P(9, x, 49, -33 - frame * 6);
     g.lS(10, C_ink, alpha); g.lB(a[3], a[4], b[3], b[4]);
     g.lS(6, energy, alpha); g.lB(a[3], a[4], b[3], b[4]);
     g.lS(2, C_white, alpha); g.lB(a[3], a[4], b[3], b[4]);
   }
   // Visor is permanent; the energy blade exists only during an attack pose.
-  const va = P(16, -4, 67, 6.3), vb = P(16, 4, 67, 6.3);
+  const va = P(16, -3, 68, 5.8), vb = P(16, 3, 68, 5.8);
   g.lS(4, C_ink, alpha); g.lB(va[3], va[4], vb[3], vb[4]);
   g.lS(2.5, energy, alpha); g.lB(va[3], va[4], vb[3], vb[4]);
   if (blade) {
@@ -2062,7 +2062,7 @@ const lockTurn = async (s) => {
   s.dH = s.state.us.map((u) => u.hp);
   s.vw.forEach((v, i) => {
     const u = s.state.us[i];
-    Object.assign(v, { gx: u.x, gy: u.y, fc: u.fc, st: u.st, pose: 'idle', frame: 0 });
+    Object.assign(v, { gx: u.x, gy: u.y, fc: u.fc, st: u.st });
   });
   await wait(s, 450);
   if (token === s.token) beginTurn(s);
@@ -2169,7 +2169,8 @@ const playEvents = async (s, events, token) => {
     if (token !== s.token) return false;
     const u = v[e.who];
     if (e.t === 'order') {
-      // Both actions are revealed together; speed decides what lands first.
+      // Both actions are revealed together; speed decides what lands first. Held poses drop here.
+      v.forEach((x) => (x.pose = 'idle'));
       s.banner = e.acts.map((a, i) => actLabel(i) + ACTIONS[a].name + (a === 'wait' ? '' : ' ' + e.spd[i])).join('  VS  ');
       e.acts.forEach((a, i) => floatText(s, v[i], ACTIONS[a].name, unitColor(i), 18, 1100));
       s.sfx.tick();
@@ -2196,7 +2197,8 @@ const playEvents = async (s, events, token) => {
         }
         const steps = m.wp.length * 3;
         let n = 0;
-        if (thrust) { mover.pose = 'move'; mover.fc = m.fc; }
+        mover.pose = thrust ? 'move' : 'idle';
+        if (thrust) mover.fc = m.fc;
         for (const c of m.wp) {
           const x = mover.gx, y = mover.gy;
           for (let f = 0; f < 3; f++, n++) {
@@ -2229,13 +2231,13 @@ const playEvents = async (s, events, token) => {
         await wait(s, 90);
         u.frame = 2;
         await wait(s, slash ? 110 : 70);
-        u.pose = 'idle'; u.frame = 0;
       } else await wait(s, 260);
     } else if (e.t === 'miss') {
       floatText(s, u, 'MISS', 0x9aa0b0, 14);
       await wait(s, 350);
     } else if (e.t === 'hit') {
       u.flash = 1;
+      u.pose = 'idle';
       const hitAt = toIso(u.gx, u.gy);
       addFx(s, { kd: 'shards', x: hitAt.x, y: hitAt.y - 30, color: e.who ? C_cpu : C_p1, dur: 380 });
       s.dH[e.who] = M_max(0, s.dH[e.who] - e.dmg);
@@ -2256,6 +2258,7 @@ const playEvents = async (s, events, token) => {
       floatText(s, u, ACTIONS[e.act].name + ' LOST', C_bolt, 13, 1300);
       await wait(s, 450);
     } else if (e.t === 'knock') {
+      u.pose = 'idle';
       for (const c of e.wp) await tweenTo(s, u, c.x, c.y, STEP_MS * (e.fly ? 0.45 : 0.7));
     } else if (e.t === 'break') {
       LAGO_MAP[e.y][e.x] = 0;
@@ -2403,7 +2406,7 @@ const drawWorld = (s, time, delta) => {
     }
     if (s.ph === 'aim') {
       const plan = selPlan(s);
-      if (plan) ghost = previewPlan(me, plan, s.state.us[1]);
+      if (plan && !(a.strike && plan.act !== 'lunge')) ghost = previewPlan(me, plan, s.state.us[1]);
     }
   }
   if (play && s.ph === 'throw') {
@@ -2424,7 +2427,9 @@ const drawWorld = (s, time, delta) => {
   for (const { v, i } of order) {
     v.flash = M_max(0, v.flash - delta / 250);
     if (i === 0 && ghost) drawMecha(gu, ghost.x, ghost.y, ghost.fc, C_p1, 0.35, 0, 0, 'idle', 0);
-    drawMecha(gu, v.gx, v.gy, v.fc, unitColor(i), 1, v.flash, v.st, v.pose, v.frame);
+    const pl = s.ph === 'aim' ? s.sel : s.ph === 'locked' && s.p1Plan;
+    const guard = !i && play && pl && STRIKE_ACTS.includes(pl.act) && (pl.act === 'hslash' ? 'hslash' : 'vslash');
+    drawMecha(gu, v.gx, v.gy, guard ? pl.dir : v.fc, unitColor(i), 1, v.flash, v.st, guard || v.pose, guard ? 0 : v.frame);
     const p = toIso(v.gx, v.gy);
     const n = s.vw[1 - i];
     const near = M_abs(v.gx - n.gx) + M_abs(v.gy - n.gy) < 3;
