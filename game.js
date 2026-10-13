@@ -7,21 +7,29 @@ const W = 800;
 const H = 600;
 
 const COLORS = {
-  bg: 0x05060a,
-  band: 0x0b0d14,
-  p1: 0x00ffff,
-  cpu: 0xff0055,
-  coast: 0x00ff88,
-  bolt: 0xffff00,
-  white: 0xffffff,
+  bg: 0x071019,
+  p1: 0x35e9f2,
+  cpu: 0xff315f,
+  coast: 0xe2c990,
+  bolt: 0xffe45c,
+  white: 0xf4f2e7,
+  ink: 0x050b12,
+  water: 0x07556a,
+  waterHi: 0x08788c,
+  waterLo: 0x042f41,
+  land: 0x294c35,
+  landMid: 0x183426,
+  landDark: 0x0b211a,
+  concrete: 0xc8c9c3,
+  steel: 0x687983,
+  wood: 0x75452f,
+  rust: 0xb65e3d,
 };
 
 // Iso tile size (px) and vertical extrusions.
 const TW = 44;
 const TH = 22;
 const SLAB_H = 14;
-const HUT_STILT = 7;
-const HUT_H = 8;
 const TOWER_H = 64;
 const DECK_H = 8;
 
@@ -41,7 +49,6 @@ const OPPOSITE = { N: 'S', S: 'N', E: 'W', W: 'E' };
 // Combat tuning (ROADMAP.md §3–§4).
 const HP_MAX = 100;
 const SLASH_DMG = 34; // 3 clean hits to KO
-const BACK_MULT = 1.5;
 const LUNGE_DMG = 25;
 const LUNGE_FLANK = 2; // lunge damage multiplier when hitting a side or the back
 const LUNGE_DASH = 2;
@@ -54,7 +61,7 @@ const TURN_PENALTY = 40; // speed lost when a strike/parry/grab must turn first
 const CLASH_WINDOW = 40; // strikes at each other within this speed gap clash
 
 // Zone events (P8).
-const ZONE_CHANCE = { cat: 0.35, verdin: 0.4, oil: 1 }; // probability per turn
+const ZONE_CHANCE = { cat: 0.35, verdin: 0.4 }; // probability per turn
 const ZONE_VERDIN_DMG = 8; // slip damage
 
 // Stance ladder: NORMAL→STAGGERED→KNOCKBACK→DOWN
@@ -62,6 +69,7 @@ const ST_NORMAL = 0;
 const ST_STAGGERED = 1;
 const ST_KNOCKBACK = 2;
 const ST_DOWN = 3;
+const ST_NAME = ['', 'STAGGERED', 'KNOCKBACK', 'DOWN'];
 
 // Timing (ms).
 const TURN_MS = 15000;
@@ -75,50 +83,37 @@ const CARD_MS = 3500; // attract-mode how-to-play card rotation
 const ATTRACT_OVER_MS = 2500;
 const OVER_IDLE_MS = 20000;
 
-const P1_START = { x: 7, y: 15, facing: 'N' };
-const CPU_START = { x: 6, y: 8, facing: 'S' };
+const P1_START = { x: 4, y: 8, facing: 'E' }; // Costa occidental: Maracaibo
+const CPU_START = { x: 20, y: 8, facing: 'W' }; // Costa oriental: Cabimas
 
-// 0 water · 1 land · 2 bridge · 3 palafito · 4 Catatumbo · 5 scenery water (not walkable) · 6 verdín · 7 oil
-// 14 wide × 20 tall, north at the top (drawn top-left). Traced from the real lake outline with the
-// gulf + strait compressed into scenery; the field is the bridge and everything south of it.
-const LAGO_MAP = [
-  [1, 1, 1, 1, 1, 5, 5, 5, 5, 5, 5, 5, 5, 5],
-  [1, 1, 1, 1, 1, 5, 5, 5, 5, 5, 5, 5, 5, 5],
-  [1, 1, 1, 1, 1, 5, 5, 5, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 5, 5, 5, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1],
-  [1, 1, 1, 0, 6, 0, 0, 0, 0, 1, 1, 1, 1, 1],
-  [1, 1, 1, 0, 0, 0, 0, 0, 6, 1, 1, 1, 1, 1],
-  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1],
-  [1, 1, 0, 0, 0, 0, 7, 0, 0, 0, 0, 1, 1, 1],
-  [1, 1, 0, 0, 0, 7, 0, 0, 0, 0, 0, 1, 1, 1],
-  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
-  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 1, 1],
-  [1, 1, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 1, 1],
-  [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 6, 3, 1, 1],
-  [1, 1, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
-  [1, 1, 1, 4, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
-  [1, 1, 1, 1, 4, 0, 0, 0, 0, 0, 0, 1, 1, 1],
-  [1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1],
-  [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-];
+// 0 water · 1 land · 2 bridge · 3 palafito · 4 Catatumbo · 5 void · 6 verdín · 7 oil
+// Deterministic 26×26 Maracaibo silhouette: gulf, northern neck, broad body and southern tip.
+const LAKE_HALF = [4, 4, 3, 2, 1, 2, 8, 8, 7, 7, 8, 8, 9, 9, 9, 9, 8, 8, 7, 7, 6, 5, 4, 2, 0, -1];
+const LAGO_MAP = Array.from({ length: 26 }, (_, y) => Array.from({ length: 26 }, (_, x) => (Math.abs(x - 12) <= LAKE_HALF[y] ? 0 : 1)));
+for (const [t, ...p] of [
+  [2, 10, 4, 11, 4, 12, 4, 13, 4, 14, 4],
+  [3, 18, 9, 19, 9, 20, 12, 21, 12, 20, 15, 21, 15],
+  [4, 3, 15, 4, 16, 5, 17],
+  [5, 1, 10],
+  [6, 4, 6, 9, 8, 16, 11, 8, 18],
+  [7, 4, 13, 13, 10, 10, 16, 14, 19],
+]) for (let i = 0; i < p.length; i += 2) LAGO_MAP[p[i + 1]][p[i]] = t;
 const ROWS = LAGO_MAP.length;
 const COLS = LAGO_MAP[0].length;
 
-// Out-of-bounds reads as land.
+// Void outside the board is never traversable.
 function tileAt(x, y) {
-  return (LAGO_MAP[y] && LAGO_MAP[y][x]) ?? 1;
+  return x < 0 || y < 0 || x >= COLS || y >= ROWS || x % 1 || y % 1 ? 5 : LAGO_MAP[y][x];
 }
 
 function isWalkable(x, y) {
   const t = tileAt(x, y);
-  return t === 0 || t === 2 || t === 4 || t === 6 || t === 7;
+  return t !== 3 && t !== 5;
 }
 
-// Lake = anything that is not land (palafitos stand in the water, scenery water included).
 function isLake(x, y) {
-  return tileAt(x, y) !== 1;
+  const t = tileAt(x, y);
+  return t !== 1 && t !== 5;
 }
 
 // == INPUT ==
@@ -207,7 +202,7 @@ function consumePressed(controls, code) {
 // A plan is { act, dir } or { act, path }.
 
 const ACTIONS = {
-  move: { name: 'MOVE', spd: 100, target: 'tile', range: 2, info: ['WALK UP TO 2 TILES', '2 TILES = MOMENTUM (UNLOCKS LUNGE)'] },
+  move: { name: 'MOVE', spd: 100, target: 'tile', range: 3, info: ['FORWARD 3 // SIDE 2 // BACK 1', 'FORWARD 3 = MOMENTUM // FACE MOVE'] },
   dodge: { name: 'DODGE', spd: 220, target: 'tile', range: 1, info: ['HOP 1 TILE, KEEP FACING', 'VERY FAST: ESCAPE AN ATTACK'] },
   pivot: { name: 'PIVOT', spd: 250, target: 'dir', info: ['TURN TO FACE ANOTHER SIDE', 'FASTEST ACTION'] },
   vslash: { name: 'V-SLASH', spd: 150, target: 'dir', strike: true, info: ['3 TILES FORWARD: 34 DMG', 'X2 ON FLANK'] },
@@ -251,8 +246,15 @@ function frontOf(u) {
   return step(u, u.facing);
 }
 
-function backOf(u) {
-  return step(u, OPPOSITE[u.facing]);
+// Classify an attacker relative to a defender's facing at any distance.
+// Diagonals read as sides; only a dominant forward/back component is front/back.
+function relativeSide(defender, attacker) {
+  const f = DIRS[defender.facing];
+  const rx = attacker.x - defender.x;
+  const ry = attacker.y - defender.y;
+  const dot = rx * f.dx + ry * f.dy;
+  const cross = rx * f.dy - ry * f.dx;
+  return dot > Math.abs(cross) ? 'front' : -dot > Math.abs(cross) ? 'back' : 'side';
 }
 
 function dist(a, b) {
@@ -277,8 +279,8 @@ function speedOf(u, plan) {
   return a.spd - (turns ? TURN_PENALTY : 0);
 }
 
-// Tiles unit i can reach in up to `range` steps in a straight line (cardinal only, no diagonals).
-// Returns Map "x,y" -> path (array of cells, start excluded).
+// Straight cardinal reach. MOVE (range 3) uses facing: forward 3, sides 2, back 1.
+// DODGE keeps a uniform one-tile cross.
 function reach(s, i, range) {
   const me = s.units[i];
   const foe = s.units[1 - i];
@@ -286,7 +288,8 @@ function reach(s, i, range) {
   for (const k of DIR_KEYS) {
     const path = [];
     let c = me;
-    for (let n = 0; n < range; n++) {
+    const max = range === 3 ? (k === me.facing ? 3 : k === OPPOSITE[me.facing] ? 1 : 2) : range;
+    for (let n = 0; n < max; n++) {
       const t = step(c, k);
       if (!isWalkable(t.x, t.y) || same(t, foe)) break;
       path.push(t);
@@ -333,24 +336,23 @@ function advanceStance(u) {
   u.st = Math.min(ST_DOWN, u.st + 1);
 }
 
-// Beginning of a turn: DOWN → STAGGERED (wake up staggering). Staggered/Knockback remain.
+// Beginning of a turn: DOWN wakes into STAGGERED. Recovery is completed only
+// after that unit has spent the turn unable to act and has not been hit again.
 function resolveStanceRecovery(u) {
   if (u.st === ST_DOWN) u.st = ST_STAGGERED;
 }
 
 // Zone event tiles: 4=Catatumbo, 6=verdín, 7=oil.
 const ZONE_TILES = { '4': 'cat', '6': 'verdin', '7': 'oil' };
-const ZONE_TAG = { cat: 'CAT', verdin: 'VERDIN', oil: 'OIL' };
 const ZONE_COLOR = { cat: 0xffff00, verdin: 0x00ff88, oil: 0xff8800 };
 
 // Check a unit's tile, trigger the zone effect. Mutates the unit.
 function resolveZone(s, i, events, rnd = Math.random) {
   const u = s.units[i];
   const t = tileAt(u.x, u.y);
-  const key = '' + t;
-  const zone = ZONE_TILES[key];
+  const zone = ZONE_TILES[t];
   if (!zone) return;
-  const tag = ZONE_TAG[zone];
+  const tag = zone.toUpperCase();
   const color = ZONE_COLOR[zone];
   if (zone === 'cat' && rnd() < ZONE_CHANCE.cat) {
     u.hp = Math.max(0, u.hp - Math.round(SLASH_DMG * 0.5));
@@ -362,11 +364,13 @@ function resolveZone(s, i, events, rnd = Math.random) {
     u.hp = Math.max(0, u.hp - ZONE_VERDIN_DMG);
     // Push back 1 tile if possible.
     const back = step(u, OPPOSITE[u.facing]);
+    let path = [];
     if (isWalkable(back.x, back.y) && !same(back, s.units[1 - i])) {
       u.x = back.x;
       u.y = back.y;
+      path = [back];
     }
-    events.push({ t: 'zone', who: i, zone: tag, dmg: ZONE_VERDIN_DMG, push: true, color });
+    events.push({ t: 'zone', who: i, zone: tag, dmg: ZONE_VERDIN_DMG, push: path.length > 0, path, color });
     return;
   }
   if (zone === 'oil') {
@@ -387,18 +391,17 @@ function vslashTiles(u) {
   return out;
 }
 
-// H-SLASH: 3×2 block forward (3 wide, 2 deep).
+// H-SLASH: three independent lanes, each stopping at its first solid tile.
 function hslashTiles(u) {
   const d = DIRS[u.facing];
-  // Perpendicular axes: for N/S it's E/W. For E/W it's N/S.
-  const perp = u.facing === 'N' || u.facing === 'S' ? ['E', 'W'] : ['N', 'S'];
-  const p = perp.map(k => DIRS[k]);
+  const side = u.facing === 'N' || u.facing === 'S' ? DIRS.E : DIRS.N;
   const out = [];
-  for (let depth = 1; depth <= 2; depth++) {
-    const row = { x: u.x + d.dx * depth, y: u.y + d.dy * depth };
-    out.push(row);
-    out.push({ x: row.x + p[0].dx, y: row.y + p[0].dy });
-    out.push({ x: row.x + p[1].dx, y: row.y + p[1].dy });
+  for (let lane = -1; lane <= 1; lane++) {
+    for (let depth = 1; depth <= 2; depth++) {
+      const c = { x: u.x + side.dx * lane + d.dx * depth, y: u.y + side.dy * lane + d.dy * depth };
+      if (!isWalkable(c.x, c.y)) break;
+      out.push(c);
+    }
   }
   return out;
 }
@@ -411,10 +414,24 @@ function inTiles(pos, tiles) {
 function resolveTurn(state, plans) {
   const s = cloneState(state);
   const U = s.units;
+  const start = U.map((u) => ({ x: u.x, y: u.y, facing: u.facing }));
   const events = [];
-  const p = plans.map((plan, i) => (U[i].st !== ST_NORMAL || !canUse(U[i], plan.act) ? WAIT_PLAN : plan));
+  const enteredSt = U.map((u) => u.st);
+  U.forEach((u, i) => {
+    if (u.st === ST_DOWN) {
+      resolveStanceRecovery(u);
+      events.push({ t: 'stance', who: i, st: u.st });
+    }
+  });
+  const turnSt = U.map((u) => u.st);
+  const recovering = enteredSt.map((st) => st !== ST_NORMAL);
+  const p = plans.map((plan, i) => {
+    plan = plan || WAIT_PLAN;
+    const burstEscape = plan.act === 'burst' && canUse(U[i], 'burst');
+    return (U[i].st === ST_NORMAL || burstEscape) && canUse(U[i], plan.act) ? plan : WAIT_PLAN;
+  });
   const spd = p.map((plan, i) => (plan.act === 'wait' ? 0 : speedOf(U[i], plan)));
-  const momentum = U.map((u, i) => p[i].act === 'move' && (p[i].path || []).length === 2);
+  const momentum = [false, false];
   U.forEach((u, i) => p[i].act === 'lunge' && (u.momentum = false));
   events.push({ t: 'order', acts: p.map((x) => x.act), spd });
 
@@ -436,7 +453,7 @@ function resolveTurn(state, plans) {
         if (end[i].path.length) {
           u.x = end[i].at.x;
           u.y = end[i].at.y;
-          events.push({ t: 'move', who: i, path: end[i].path, facing: u.facing });
+          events.push({ t: 'move', who: i, path: end[i].path, facing: u.facing, act: p[i].act });
         } else {
           events.push({ t: 'face', who: i, facing: u.facing });
         }
@@ -453,16 +470,17 @@ function resolveTurn(state, plans) {
   const done = [false, false];
   let grab = null;
 
-  const strike = (i, dmg, back, flankMult) => {
+  const strike = (i, dmg, flankMult) => {
     const foe = U[1 - i];
-    const flank = !same(frontOf(foe), U[i]);
+    const relation = relativeSide(foe, U[i]);
+    const flank = relation !== 'front';
     const total = Math.round(dmg * (flank ? flankMult : 1));
     foe.hp = Math.max(0, foe.hp - total);
     gainGuts(U[i], 1);
     const prevSt = foe.st;
     advanceStance(foe);
     if (prevSt !== foe.st) events.push({ t: 'stance', who: 1 - i, st: foe.st });
-    events.push({ t: 'hit', who: 1 - i, dmg: total, flank: flank && flankMult > 1 });
+    events.push({ t: 'hit', who: 1 - i, dmg: total, flank: flank && flankMult > 1, relation, prevSt });
     if (!done[1 - i] && !groups.find((g) => g.includes(i)).includes(1 - i) && p[1 - i].act !== 'wait' && !cancelled[1 - i]) {
       cancelled[1 - i] = true;
       events.push({ t: 'interrupt', who: 1 - i, act: p[1 - i].act });
@@ -487,10 +505,13 @@ function resolveTurn(state, plans) {
       const a = p[i].act;
       if (a === 'lunge') walk[i] = dashPath(U[i], p[i].dir, LUNGE_DASH, U[1 - i]);
       if (ACTIONS[a].target !== 'tile') continue;
-      const path = [];
-      for (const c of p[i].path || []) {
-        if (same(c, U[1 - i]) || !isWalkable(c.x, c.y)) break;
-        path.push(c);
+      const path = [], cells = p[i].path || [], dir = dirBetween(U[i], cells[0]);
+      const max = a === 'move' ? (dir === start[i].facing ? 3 : dir === OPPOSITE[start[i].facing] ? 1 : 2) : 1;
+      let c = U[i];
+      for (const t of cells) {
+        if (!dir || path.length >= max || !same(t, step(c, dir)) || same(t, U[1 - i]) || !isWalkable(t.x, t.y)) break;
+        path.push(t);
+        c = t;
       }
       walk[i] = path;
     }
@@ -507,11 +528,14 @@ function resolveTurn(state, plans) {
         continue;
       }
       const last = path[path.length - 1];
-      const prev = path.length > 1 ? path[path.length - 2] : U[i];
-      if (p[i].act !== 'dodge') U[i].facing = dirBetween(prev, last);
+      if (p[i].act !== 'dodge') U[i].facing = dirBetween(U[i], path[0]);
       U[i].x = last.x;
       U[i].y = last.y;
-      events.push({ t: 'move', who: i, path, facing: U[i].facing });
+      if (p[i].act === 'move' && path.length === 3) {
+        let c = start[i];
+        momentum[i] = path.every((t) => same(t, (c = step(c, start[i].facing))));
+      }
+      events.push({ t: 'move', who: i, path, facing: U[i].facing, act: p[i].act });
     }
 
     for (const i of acting) {
@@ -538,30 +562,48 @@ function resolveTurn(state, plans) {
         events.push({ t: 'miss', who: i });
         continue;
       }
-      if (guard[1 - i] && same(frontOf(foe), u)) {
+      if (guard[1 - i] && relativeSide(foe, u) === 'front') {
         gainGuts(foe, 1);
         advanceStance(u); // parried → staggered
         events.push({ t: 'stance', who: i, st: u.st });
         events.push({ t: 'parry', who: 1 - i });
         continue;
       }
-      if (p[i].act === 'vslash' || p[i].act === 'hslash') strike(i, SLASH_DMG, false, 2);
-      else strike(i, LUNGE_DMG, false, LUNGE_FLANK);
+      if (p[i].act === 'vslash' || p[i].act === 'hslash') strike(i, SLASH_DMG, 2);
+      else {
+        strike(i, LUNGE_DMG, LUNGE_FLANK);
+        const to = step(foe, u.facing);
+        if (isWalkable(to.x, to.y) && !same(to, u)) {
+          foe.x = to.x;
+          foe.y = to.y;
+          events.push({ t: 'knock', who: 1 - i, path: [to] });
+        }
+      }
     }
 
-    // Grab ignores parry; the throw direction is chosen next (resolveThrow).
-    for (const i of acting) {
-      if (p[i].act !== 'grab' || cancelled[i]) continue;
-      const f = frontOf(U[i]);
-      events.push({ t: 'grab', who: i, x: f.x, y: f.y });
-      if (!same(f, U[1 - i])) {
-        events.push({ t: 'miss', who: i });
-        continue;
+    // Equal-speed mutual GRAB has no player-order bias: both collide and fail.
+    const mutualGrab = acting.length === 2 && acting.every((i) => p[i].act === 'grab') && same(frontOf(U[0]), U[1]) && same(frontOf(U[1]), U[0]);
+    if (mutualGrab) {
+      acting.forEach((i) => {
+        const f = frontOf(U[i]);
+        events.push({ t: 'grab', who: i, x: f.x, y: f.y });
+        events.push({ t: 'bump', who: i });
+      });
+    } else {
+      // Grab ignores parry; the throw direction is chosen next (resolveThrow).
+      for (const i of acting) {
+        if (p[i].act !== 'grab' || cancelled[i]) continue;
+        const f = frontOf(U[i]);
+        events.push({ t: 'grab', who: i, x: f.x, y: f.y });
+        if (!same(f, U[1 - i])) {
+          events.push({ t: 'miss', who: i });
+          continue;
+        }
+        strike(i, GRAB_DMG, 1);
+        grab = i;
+        events.push({ t: 'caught', who: 1 - i });
+        break;
       }
-      strike(i, GRAB_DMG, false, 1);
-      grab = i;
-      events.push({ t: 'caught', who: 1 - i });
-      break;
     }
 
     g.forEach((i) => (done[i] = true));
@@ -569,7 +611,12 @@ function resolveTurn(state, plans) {
   }
 
   U.forEach((u, i) => {
-    resolveStanceRecovery(u);
+    // Only a stance carried into this turn may recover, and only if no new hit
+    // advanced it. Newly applied stance always survives this resolve.
+    if (recovering[i] && u.st === turnSt[i] && p[i].act !== 'burst') {
+      u.st = ST_NORMAL;
+      events.push({ t: 'stance', who: i, st: ST_NORMAL });
+    }
     if (p[i].act !== 'lunge') u.momentum = momentum[i];
     if (momentum[i]) events.push({ t: 'momentum', who: i });
   });
@@ -591,8 +638,15 @@ function resolveThrow(state, who, dir) {
     foe.y = last.y;
   }
   foe.hp = Math.max(0, foe.hp - dmg);
+  const prevSt = foe.st;
+  foe.st = ST_DOWN;
   gainGuts(me, 1);
-  const events = [{ t: 'throw', who, dir }, { t: 'knock', who: 1 - who, path }, { t: 'hit', who: 1 - who, dmg, slam }];
+  const events = [
+    { t: 'throw', who, dir },
+    { t: 'knock', who: 1 - who, path },
+    { t: 'stance', who: 1 - who, st: ST_DOWN },
+    { t: 'hit', who: 1 - who, dmg, slam, prevSt },
+  ];
   finishTurn(s);
   return { state: s, events };
 }
@@ -636,11 +690,15 @@ function resolveClash(state, picks) {
   return { state: s, events };
 }
 
-function finishTurn(s) {
+function checkOutcome(s) {
   const [a, b] = s.units;
   if (a.hp <= 0 && b.hp <= 0) s.over = 'draw';
   else if (a.hp <= 0) s.over = 'cpu';
   else if (b.hp <= 0) s.over = 'p1';
+}
+
+function finishTurn(s) {
+  checkOutcome(s);
   s.turn++;
 }
 
@@ -703,17 +761,18 @@ function cpuPlan(s, i, rnd = Math.random) {
 
   // Approach: closest reachable tile, avoiding the foe's front tile and tiles the foe can also
   // reach this turn (both walking into the same tile bumps forever). Vary among the best few.
-  const paths = [...reach(s, i, 2).values()];
+  const paths = [...reach(s, i, 3).values()];
   if (!paths.length) return { act: 'pivot', dir: me.facing };
-  const foeReach = reach(s, 1 - i, 2);
-  const score = (path) => {
+  const foeReach = reach(s, 1 - i, 3);
+  const scored = paths.map((path) => {
     const t = path[path.length - 1];
     const contested = foeReach.has(t.x + ',' + t.y) ? 8 : 0;
     const zoneBonus = tileAt(t.x, t.y) === 7 ? -10 : tileAt(t.x, t.y) === 4 ? 8 : tileAt(t.x, t.y) === 6 ? 6 : 0;
-    return dist(t, foe) * 10 + (same(t, frontOf(foe)) ? 15 : 0) + contested + zoneBonus + rnd() * 10;
-  };
-  paths.sort((a, b) => score(a) - score(b));
-  return { act: 'move', path: paths[rnd() < 0.7 ? 0 : Math.min(paths.length - 1, 1 + Math.floor(rnd() * 2))] };
+    return { path, score: dist(t, foe) * 10 + (same(t, frontOf(foe)) ? 15 : 0) + contested + zoneBonus + rnd() * 10 };
+  });
+  scored.sort((a, b) => a.score - b.score);
+  const pickIndex = rnd() < 0.7 ? 0 : Math.min(scored.length - 1, 1 + Math.floor(rnd() * 2));
+  return { act: 'move', path: scored[pickIndex].path };
 }
 
 // Throw toward land if it slams, otherwise any open direction.
@@ -735,10 +794,11 @@ function cpuClashPick(lastFoePick, guts = 0, rnd = Math.random) {
 
 // == RENDER ==
 
-// Projection puts north (the strait) at the top-left and the lake body toward the viewer:
-// +x (east) → screen up-right, +y (south) → screen down-right.
-const ISO_OX = W / 2 - ((COLS + ROWS - 2) * TW) / 4;
-const ISO_OY = H / 2 - ((ROWS - COLS) * TH) / 4 + 8;
+// Positive world coordinates leave room for the 25×25 plate, pylons and mechas.
+const WORLD_W = 1200;
+const WORLD_H = 740;
+const ISO_OX = WORLD_W / 2 - ((COLS + ROWS - 2) * TW) / 4;
+const ISO_OY = 340;
 
 // Grid cell → screen centre of its rhombus.
 function toIso(x, y) {
@@ -763,17 +823,17 @@ function cellPts(x, y) {
 // Rhombus edge shared with the neighbour in each grid direction.
 const EDGE = { N: [3, 0], E: [0, 1], S: [1, 2], W: [2, 3] };
 
-// Extruded rhombus: dark faces occlude what is behind, wire edges on top.
-function drawPrism(g, cx, cy, hw, hh, h, color) {
+// Solid extruded rhombus with a fixed upper-left key light.
+function drawPrism(g, cx, cy, hw, hh, h, color, mid = COLORS.landMid, dark = COLORS.landDark) {
   const top = rhombus(cx, cy - h, hw, hh);
   const left = [top[3], top[2], { x: cx, y: cy + hh }, { x: cx - hw, y: cy }];
   const right = [top[2], top[1], { x: cx + hw, y: cy }, { x: cx, y: cy + hh }];
-  for (const face of [left, right, top]) {
-    g.fillStyle(COLORS.bg, 1);
+  [[left, mid], [right, dark], [top, color]].forEach(([face, fill]) => {
+    g.fillStyle(fill, 1);
     g.fillPoints(face, true);
-    g.lineStyle(1.5, color, 0.9);
+    g.lineStyle(1, COLORS.ink, 0.9);
     g.strokePoints(face, true);
-  }
+  });
 }
 
 // Front faces of the board slab: west column (down-left side) and south row (down-right side).
@@ -787,73 +847,133 @@ function drawSlab(g) {
     const p = cellPts(x, ROWS - 1);
     edges.push([p[EDGE.S[0]], p[EDGE.S[1]]]);
   }
-  for (const [a, b] of edges) {
+  for (let k = 0; k < edges.length; k++) {
+    const [a, b] = edges[k];
     const quad = [a, b, { x: b.x, y: b.y + SLAB_H }, { x: a.x, y: a.y + SLAB_H }];
-    g.fillStyle(COLORS.bg, 1);
+    g.fillStyle(a.x < b.x ? 0x102b25 : 0x081a1d, 1);
     g.fillPoints(quad, true);
-    g.lineStyle(1.5, COLORS.coast, 0.8);
+    g.lineStyle(1.5, COLORS.ink, 1);
     g.strokePoints(quad, true);
-  }
-}
-
-function drawTiles(g) {
-  for (let y = 0; y < ROWS; y++) {
-    for (let x = 0; x < COLS; x++) {
-      const t = tileAt(x, y);
-      const pts = cellPts(x, y);
-      if (t === 1) {
-        g.lineStyle(1, COLORS.coast, 0.4);
-        g.strokePoints(pts, true);
-        continue;
-      }
-      if (t === 5) {
-        g.lineStyle(1, COLORS.p1, 0.2);
-        g.strokePoints(pts, true);
-        continue;
-      }
-      const tileColors = { 3: COLORS.p1, 4: COLORS.bolt, 6: 0x00ff88, 7: 0xff8800 };
-      const color = tileColors[t] || COLORS.p1;
-      g.fillStyle(color, t === 6 || t === 7 ? 0.12 : 0.05);
-      g.fillPoints(pts, true);
-      g.lineStyle(1, color, t === 6 || t === 7 ? 0.7 : 0.5);
-      g.strokePoints(pts, true);
+    g.lineStyle(1, 0x376153, 0.42);
+    g.lineBetween(a.x, a.y + 4, b.x, b.y + 4);
+    if (k % 3 === 0) {
+      const x = (a.x + b.x) / 2;
+      const y = (a.y + b.y) / 2 + 9;
+      g.fillStyle(0x668071, 0.55);
+      g.fillCircle(x, y, 1.2);
     }
   }
 }
 
-// Bright line wherever lake meets land.
-function drawShore(g) {
-  g.lineStyle(2, COLORS.coast, 1);
+function drawTiles(g) {
+  const landTones = [COLORS.land, 0x31583b, 0x3a5235, 0x24442f];
+  const waterTones = [COLORS.water, 0x075f72, 0x08687a, COLORS.waterHi];
   for (let y = 0; y < ROWS; y++) {
     for (let x = 0; x < COLS; x++) {
-      if (!isLake(x, y)) continue;
+      const t = tileAt(x, y);
       const pts = cellPts(x, y);
-      for (const [key, d] of Object.entries(DIRS)) {
-        const nx = x + d.dx;
-        const ny = y + d.dy;
-        const inside = nx >= 0 && ny >= 0 && nx < COLS && ny < ROWS;
-        if (!inside || isLake(nx, ny)) continue;
-        const [i, j] = EDGE[key];
-        g.lineBetween(pts[i].x, pts[i].y, pts[j].x, pts[j].y);
+      const c = toIso(x, y);
+      const water = t !== 1;
+      const hash = (x * 37 + y * 61 + x * y * 7) & 15;
+      let color = water ? waterTones[hash & 3] : landTones[hash & 3];
+      if (t === 4) color = 0x164957;
+      if (t === 6) color = 0x22664a;
+      if (t === 7) color = 0x174956;
+      g.fillStyle(color, 1);
+      g.fillPoints(pts, true);
+      g.lineStyle(1, water ? COLORS.waterLo : COLORS.landDark, water ? 0.48 : 0.72);
+      g.strokePoints(pts, true);
+
+      // Deterministic micro-texture: short ripples, tiny facets and sparse dither.
+      if (water) {
+        const ox = (hash % 5) - 2;
+        const oy = ((hash * 3) % 5) - 2;
+        g.lineStyle(1, hash & 1 ? 0x31a0aa : 0x0a8494, 0.25 + (hash % 3) * 0.08);
+        g.lineBetween(c.x - 8 + ox, c.y - 2 + oy, c.x - 1 + ox, c.y - 4 + oy);
+        if (hash % 3 === 0) g.lineBetween(c.x + 3, c.y + 3, c.x + 9, c.y + 1);
+        if (hash % 5 === 0) {
+          g.fillStyle(0xa7d8d2, 0.16);
+          g.fillRect(c.x + ox, c.y + oy, 2, 1);
+        }
+      } else {
+        g.lineStyle(1, hash & 1 ? 0x58704b : 0x1d3928, 0.35);
+        g.lineBetween(c.x - 7, c.y + (hash % 4) - 2, c.x - 1, c.y + (hash % 4) - 4);
+        if (hash % 4 === 0) {
+          g.fillStyle(0x75553a, 0.3);
+          g.fillTriangle(c.x + 4, c.y - 2, c.x + 9, c.y, c.x + 5, c.y + 2);
+        }
+      }
+      if (t === 4) {
+        g.fillStyle(0x1c2638, 0.38);
+        g.fillCircle(c.x - 3, c.y - 2, 5);
+      } else if (t === 6) {
+        g.fillStyle(0x5b9d59, 0.66);
+        g.fillCircle(c.x - 5, c.y, 4);
+        g.fillCircle(c.x + 5, c.y - 2, 3);
+      } else if (t === 7) {
+        g.fillStyle(0xd58339, 0.92);
+        g.fillCircle(c.x, c.y, 3);
+        g.lineStyle(1, COLORS.bolt, 0.55);
+        g.strokeCircle(c.x, c.y, 5);
+      }
+    }
+  }
+}
+
+// Carved shoreline: charcoal cut with a restrained sunlit rim.
+function drawShore(g) {
+  for (let pass = 0; pass < 3; pass++) {
+    g.lineStyle(pass === 0 ? 5 : pass === 1 ? 2.5 : 1, pass === 0 ? COLORS.ink : pass === 1 ? COLORS.coast : COLORS.white, pass === 2 ? 0.55 : 1);
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        if (!isLake(x, y)) continue;
+        const pts = cellPts(x, y);
+        for (const [key, d] of Object.entries(DIRS)) {
+          const nx = x + d.dx;
+          const ny = y + d.dy;
+          if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS || isLake(nx, ny)) continue;
+          const [i, j] = EDGE[key];
+          const a = pts[i];
+          const b = pts[j];
+          if (pass < 2) g.lineBetween(a.x, a.y, b.x, b.y);
+          else {
+            g.lineBetween(a.x, a.y, a.x + (b.x - a.x) * 0.34, a.y + (b.y - a.y) * 0.34);
+            g.lineBetween(a.x + (b.x - a.x) * 0.56, a.y + (b.y - a.y) * 0.56, b.x, b.y);
+          }
+        }
       }
     }
   }
 }
 
 function drawHut(g, cx, cy) {
-  const hw = TW / 4;
-  const hh = TH / 4;
-  g.lineStyle(1.5, COLORS.coast, 0.9);
-  for (const p of rhombus(cx, cy, hw, hh)) g.lineBetween(p.x, p.y, p.x, p.y - HUT_STILT);
-  const base = cy - HUT_STILT;
-  drawPrism(g, cx, base, hw, hh, HUT_H, COLORS.coast);
-  const roof = rhombus(cx, base - HUT_H, hw, hh);
-  const apex = { x: cx, y: base - HUT_H - hh * 2 };
-  g.lineStyle(1.5, COLORS.coast, 0.9);
-  for (const p of roof) g.lineBetween(p.x, p.y, apex.x, apex.y);
+  const hut = (x, y, scale) => {
+    const hw = 8 * scale;
+    const hh = 4 * scale;
+    g.lineStyle(3 * scale, 0x2a1713, 1);
+    for (const p of rhombus(x, y, hw, hh)) g.lineBetween(p.x, p.y, p.x, p.y - 10 * scale);
+    g.fillStyle(0x02070a, 0.45);
+    g.fillPoints(rhombus(x + 5, y + 4, hw + 3, hh + 2), true);
+    const base = y - 10 * scale;
+    drawPrism(g, x, base, hw, hh, 8 * scale, COLORS.rust, COLORS.wood, 0x3d241f);
+    const roof = rhombus(x, base - 8 * scale, hw + 4, hh + 3);
+    const apex = { x: x - 2, y: base - 21 * scale };
+    g.fillStyle(0xd4774a, 1);
+    g.fillPoints([roof[3], roof[2], apex], true);
+    g.fillStyle(0x783c32, 1);
+    g.fillPoints([roof[2], roof[1], apex], true);
+    g.lineStyle(1.5, COLORS.ink, 1);
+    g.strokePoints([roof[3], apex, roof[1], roof[2]], true);
+    g.fillStyle(0xffc76a, 0.75);
+    g.fillRect(x - 2, base - 6 * scale, 4, 3);
+  };
+  hut(cx - 6, cy, 1);
+  hut(cx + 13, cy + 2, 0.72);
+  g.lineStyle(2, 0x3d2a21, 1);
+  g.lineBetween(cx - 12, cy - 7, cx + 19, cy - 3);
 }
 
-// Cable-stayed bridge (Rafael Urdaneta) across the strait, shore to shore.
+// Solid cable-stayed Puente General Rafael Urdaneta across the northern strait.
 function drawBridge(g) {
   const row = LAGO_MAP.findIndex((r) => r.includes(2));
   if (row < 0) return;
@@ -861,29 +981,64 @@ function drawBridge(g) {
   LAGO_MAP[row].forEach((t, x) => t === 2 && xs.push(x));
   const a = toIso(xs[0] - 1, row);
   const b = toIso(xs[xs.length - 1] + 1, row);
-  g.lineStyle(2, COLORS.white, 0.9);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const n = Math.hypot(dx, dy);
+  const nx = (-dy / n) * 7;
+  const ny = (dx / n) * 7;
+  const deck = [
+    { x: a.x + nx, y: a.y + ny - DECK_H }, { x: b.x + nx, y: b.y + ny - DECK_H },
+    { x: b.x - nx, y: b.y - ny - DECK_H }, { x: a.x - nx, y: a.y - ny - DECK_H },
+  ];
+  g.fillStyle(0x02070b, 0.5);
+  g.fillPoints(deck.map((p) => ({ x: p.x + 8, y: p.y + 11 })), true);
+  g.fillStyle(0x46545b, 1);
+  g.fillPoints([deck[1], deck[2], { x: deck[2].x, y: deck[2].y + 7 }, { x: deck[1].x, y: deck[1].y + 7 }], true);
+  g.fillStyle(COLORS.concrete, 1);
+  g.fillPoints(deck, true);
+  g.lineStyle(2, COLORS.ink, 1);
+  g.strokePoints(deck, true);
+  g.lineStyle(1, 0xf2e7c5, 0.85);
   g.lineBetween(a.x, a.y - DECK_H, b.x, b.y - DECK_H);
-  g.lineBetween(a.x, a.y - DECK_H + 3, b.x, b.y - DECK_H + 3);
+
   for (const x of xs) {
     const t = toIso(x, row);
-    g.lineStyle(1.5, COLORS.white, 0.7);
-    g.lineBetween(t.x, t.y, t.x, t.y - DECK_H);
+    g.fillStyle(0x26363d, 0.7);
+    g.fillPoints([{ x: t.x - 5, y: t.y + 2 }, { x: t.x + 2, y: t.y - 1 }, { x: t.x + 4, y: t.y + 21 }, { x: t.x - 3, y: t.y + 23 }], true);
+    g.lineStyle(1.5, COLORS.ink, 1);
+    g.strokePoints([{ x: t.x - 5, y: t.y + 2 }, { x: t.x + 2, y: t.y - 1 }, { x: t.x + 4, y: t.y + 21 }, { x: t.x - 3, y: t.y + 23 }], true);
   }
   for (const x of [xs[0], xs[xs.length - 1]]) {
     const t = toIso(x, row);
     const deckY = t.y - DECK_H;
     const topY = deckY - TOWER_H;
-    g.lineStyle(2, COLORS.white, 1);
-    g.lineBetween(t.x - 4, t.y, t.x, topY);
-    g.lineBetween(t.x + 4, t.y, t.x, topY);
-    g.lineStyle(1, COLORS.white, 0.55);
+    // Distinct A-frame pylon, cross braces and bright stay cables.
+    g.lineStyle(7, 0x596970, 1);
+    g.lineBetween(t.x - 9, deckY + 2, t.x, topY);
+    g.lineBetween(t.x + 9, deckY + 2, t.x, topY);
+    g.lineStyle(3, COLORS.concrete, 1);
+    g.lineBetween(t.x - 8, deckY, t.x, topY);
+    g.lineBetween(t.x + 8, deckY, t.x, topY);
+    g.lineBetween(t.x - 5, topY + 22, t.x + 5, topY + 22);
+    g.lineStyle(1.4, 0xf7f2db, 0.92);
     for (let k = 1; k <= 4; k++) {
-      // The deck runs along grid +x, i.e. screen (+2, -1): cables fan along that slope.
       const off = (k * TW) / 5;
-      g.lineBetween(t.x, topY + 6, t.x - off, deckY + off / 2);
-      g.lineBetween(t.x, topY + 6, t.x + off, deckY - off / 2);
+      g.lineBetween(t.x, topY + 3, t.x - off, deckY + off / 2);
+      g.lineBetween(t.x, topY + 3, t.x + off, deckY - off / 2);
     }
+    g.fillStyle(COLORS.bolt, 0.9);
+    g.fillCircle(t.x, topY, 2);
   }
+}
+
+function drawCatatumboLandmark(g) {
+  const c = toIso(4, 16);
+  g.fillStyle(0x172235, 0.82);
+  g.fillCircle(c.x - 9, c.y - 22, 9);
+  g.fillCircle(c.x + 3, c.y - 27, 12);
+  g.fillCircle(c.x + 15, c.y - 21, 8);
+  g.fillStyle(0x263a50, 0.65);
+  g.fillEllipse(c.x + 2, c.y - 19, 40, 13);
 }
 
 // Static layer: drawn once.
@@ -892,6 +1047,7 @@ function drawMap(g) {
   drawTiles(g);
   drawShore(g);
   drawBridge(g);
+  drawCatatumboLandmark(g);
   const huts = [];
   for (let y = 0; y < ROWS; y++) {
     for (let x = 0; x < COLS; x++) if (tileAt(x, y) === 3) huts.push({ x, y });
@@ -906,20 +1062,13 @@ function drawMap(g) {
 
 function drawBackground(g) {
   g.fillStyle(COLORS.bg, 1);
-  g.fillRect(0, 0, W, H);
-  g.fillStyle(COLORS.band, 1);
-  for (let i = -1; i < 4; i++) {
-    const x = i * 260;
-    g.fillPoints(
-      [
-        { x, y: H },
-        { x: x + 120, y: H },
-        { x: x + 420, y: 0 },
-        { x: x + 300, y: 0 },
-      ],
-      true,
-    );
-  }
+  g.fillRect(0, 0, WORLD_W, WORLD_H);
+  g.fillStyle(0x0b1b27, 1);
+  g.fillRect(0, 0, WORLD_W, 390);
+  g.fillStyle(0x102633, 1);
+  g.fillPoints([{ x: 0, y: 300 }, { x: 220, y: 220 }, { x: 430, y: 290 }, { x: 650, y: 200 }, { x: 900, y: 285 }, { x: WORLD_W, y: 220 }, { x: WORLD_W, y: 430 }, { x: 0, y: 430 }], true);
+  g.fillStyle(0x040a10, 1);
+  g.fillRect(0, 650, WORLD_W, 90);
 }
 
 // Screen vector from a cell centre to its neighbour in a grid direction.
@@ -953,77 +1102,129 @@ function drawCell(g, x, y, color, fillAlpha, lineAlpha) {
   g.strokePoints(pts, true);
 }
 
-// Wireframe mecha standing on a (possibly fractional) grid position. `stance` (0-3) changes the
-// posture: 0 normal, 1 staggered (lean back), 2 knockback (tilt forward), 3 down (kneeling small).
-function drawMecha(g, gx, gy, facing, color, alpha, flash, stance) {
-  const c = toIso(gx, gy);
-  const v = dirVec(facing);
-  const n = Math.hypot(v.x, v.y);
-  const fx = v.x / n;
-  const fy = v.y / n;
-  const col = flash > 0 ? COLORS.white : color;
+// Shared 18-piece volumetric model: x=lateral, y=height, z=front.
+// Piece = centre xyz, width/height/depth, top x/z scale, material.
+const MECH_MODEL = [
+  [-7, 3, 3, 13, 6, 15, 0.8, 0.72, 1], [7, 3, 3, 13, 6, 15, 0.8, 0.72, 1],
+  [-7, 13, 0, 8, 16, 8, 0.72, 0.8, 0], [7, 13, 0, 8, 16, 8, 0.72, 0.8, 0],
+  [-6, 27, 0, 9, 12, 9, 0.82, 0.8, 1], [6, 27, 0, 9, 12, 9, 0.82, 0.8, 1],
+  [0, 36, 0, 22, 8, 11, 0.7, 0.78, 0],
+  [0, 48, 0, 28, 18, 13, 0.66, 0.72, 1], [0, 50, 7, 23, 9, 4, 0.78, 0.7, 2],
+  [0, 49, -8, 19, 18, 6, 0.8, 0.82, 0],
+  [-18, 53, 0, 12, 10, 14, 0.72, 0.68, 1], [18, 53, 0, 12, 10, 14, 0.72, 0.68, 1],
+  [-18, 43, 0, 7, 11, 7, 0.8, 0.8, 0], [18, 43, 0, 7, 11, 7, 0.8, 0.8, 0],
+  [-18, 33, 2, 9, 12, 9, 0.72, 0.76, 1], [18, 33, 2, 9, 12, 9, 0.72, 0.76, 1],
+  [0, 64, 1, 14, 11, 12, 0.66, 0.72, 2],
+  [18, 31, 15, 3, 4, 26, 0.7, 0.82, 3],
+];
+const MECH_FACES = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]];
+const MECH_PALS = [[0x0c2440, 0x347ab4, 0xdce9ec, 0x36efff], [0x3b1022, 0x9d1e3d, 0xef5571, 0xffd7e0]];
 
-  // Posture transforms.
-  const s = stance || ST_NORMAL;
-  let squeeze = 1; // vertical squash (1 = full height)
-  let yOff = 0; // additional sink
-  let tx = 0; // lean along facing (positive = toward facing)
-  if (s === ST_STAGGERED) tx = -6;
-  else if (s === ST_KNOCKBACK) tx = 5;
-  else if (s === ST_DOWN) {
-    squeeze = 0.62;
-    yOff = 8;
-  }
-
-  // Facing chevron on the tile, pointing at the front edge.
-  const tip = { x: c.x + v.x * 0.48, y: c.y + v.y * 0.48 };
-  const base = { x: c.x + v.x * 0.22, y: c.y + v.y * 0.22 };
-  g.fillStyle(col, 0.9 * alpha);
-  g.fillTriangle(tip.x, tip.y, base.x - fy * 7, base.y + fx * 7, base.x + fy * 7, base.y - fx * 7);
-
-  const x = c.x + tx;
-  const y = c.y + yOff;
-  // Torso: pull the top toward the ground when down (squash) to show kneeling.
-  const topY = y - 28 * squeeze;
-  const torso = [
-    { x: x - 8, y: y - 13 * squeeze },
-    { x: x + 8, y: y - 13 * squeeze },
-    { x: x + 11, y: topY },
-    { x: x - 11, y: topY },
-  ];
-  g.fillStyle(col, 0.15 * alpha);
-  g.fillPoints(torso, true);
-  g.lineStyle(1.5, col, alpha);
-  g.strokePoints(torso, true);
-  g.lineBetween(x - 6, y - 1, x - 4, y - 13 * squeeze);
-  g.lineBetween(x + 6, y - 1, x + 4, y - 13 * squeeze);
-  g.strokeRect(x - 17, y - 30 * squeeze, 6, 8 * squeeze);
-  g.strokeRect(x + 11, y - 30 * squeeze, 6, 8 * squeeze);
-  g.strokePoints(rhombus(x, y - 34 * squeeze, 5, 5), true);
-  // Visor + blade point the way the mecha faces.
-  g.lineStyle(2, col, alpha);
-  g.lineBetween(x, y - 34 * squeeze, x + fx * 6, y - 34 * squeeze + fy * 4);
-  g.lineBetween(x + fx * 9, y - 20 * squeeze, x + fx * 26, y - 20 * squeeze + fy * 13);
+function mechTone(c, k, flash) {
+  let r = Math.min(255, (c >> 16) * k), q = Math.min(255, ((c >> 8) & 255) * k), b = Math.min(255, (c & 255) * k);
+  flash = Math.min(1, flash * 1.5);
+  r = (r + (255 - r) * flash) & 248;
+  q = (q + (255 - q) * flash) & 248;
+  b = (b + (255 - b) * flash) & 248;
+  return (r << 16) | (q << 8) | b;
 }
 
-// Persona-style slanted label slab.
+// Tiny orthographic software renderer: transform, pose, back-face cull, light and painter-sort.
+function drawMecha(g, gx, gy, facing, color, alpha, flash, stance, pose = 'idle', frame = 0) {
+  const c = toIso(gx, gy), d = DIRS[facing], pal = MECH_PALS[color === COLORS.cpu ? 1 : 0];
+  const st = stance || 0, tilt = st === ST_STAGGERED ? -0.15 : st === ST_KNOCKBACK ? 0.17 : 0;
+  const sn = Math.sin(tilt), co = Math.cos(tilt), down = st === ST_DOWN;
+  const lift = pose === 'move' ? [4, 12, 3][frame] : 0;
+  const blade = pose === 'hslash'
+    ? [[[20, 35, -2], [34, 43, -24]], [[-27, 43, 13], [31, 43, 17]], [[16, 36, 2], [-31, 39, -14]]][frame]
+    : pose === 'vslash'
+    ? [[[16, 60, 4], [0, 91, 8]], [[17, 46, 4], [1, 20, 34]], [[18, 33, 4], [2, 20, 33]]][frame]
+    : null;
+  const part = (i, x, y, z) => {
+    if (pose === 'move') {
+      const leg = i < 6, arm = (i > 11 && i < 16) || i === 17;
+      const pivot = leg ? 36 : arm ? 53 : 36;
+      const a = leg ? [0.16, 0.42, 0.2][frame] + (i & 1) * 0.04 : arm ? 0.52 : [0.12, 0.3, 0.16][frame];
+      const yy = y - pivot, si = Math.sin(a), cs = Math.cos(a);
+      y = pivot + yy * cs - z * si + lift;
+      z = yy * si + z * cs;
+    } else if (blade && i === 17) {
+      const a = blade[0], b = blade[1], t = (z - 3) / 25, ox = x - 18, oy = y - 31;
+      x = a[0] + (b[0] - a[0]) * t + ox * 0.4;
+      y = a[1] + (b[1] - a[1]) * t + oy;
+      z = a[2] + (b[2] - a[2]) * t + ox * 0.2;
+    } else if (blade && (i === 11 || i === 13 || i === 15)) {
+      const q = (i - 9) / 6;
+      const a = (pose === 'hslash' ? [[5, -2, -12], [-12, 1, 10], [-20, -4, -6]] : [[-2, 14, -2], [-4, 2, 10], [-5, -6, 12]])[frame];
+      x += a[0] * q; y += a[1] * q; z += a[2] * q;
+    }
+    return [x, y, z];
+  };
+  const snap = pose === 'idle' ? 2 : 3;
+  const project = (x, y, z) => {
+    const oy = y;
+    if (down) { y *= 0.5; z += oy * 0.08; }
+    else [y, z] = [y * co - z * sn, y * sn + z * co];
+    const wx = z * d.dx - x * d.dy, wz = z * d.dy + x * d.dx;
+    const sx = c.x + (wx + wz) * 0.82, sy = c.y + (wz - wx) * 0.42 - y * 1.06 + (down ? 8 : 0);
+    return [wx, y, wz, Math.round(sx / snap) * snap, Math.round(sy / snap) * snap];
+  };
+  const P = (i, x, y, z) => project(...part(i, x, y, z));
+  g.fillStyle(0x010509, 0.7 * alpha);
+  g.fillEllipse(c.x + 4, c.y + 5, pose === 'move' ? 34 : 48, pose === 'move' ? 8 : 14);
+  const faces = [];
+  for (let pi = 0; pi < MECH_MODEL.length; pi++) {
+    if (pi === 17 && !blade) continue;
+    const p = MECH_MODEL[pi], [x, y, z, w, h, depth, tx, tz, mat] = p, verts = [];
+    for (let i = 0; i < 8; i++) {
+      const top = i > 3, j = i & 3;
+      verts.push(P(pi, x + (j === 0 || j === 3 ? -1 : 1) * w * (top ? tx : 1) / 2, y + (top ? h : -h) / 2, z + (j < 2 ? -1 : 1) * depth * (top ? tz : 1) / 2));
+    }
+    for (const f of MECH_FACES) {
+      const a = verts[f[0]], b = verts[f[1]], e = verts[f[2]];
+      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = e[0] - a[0], vy = e[1] - a[1], vz = e[2] - a[2];
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      if (-nx + ny * 0.75 + nz <= 0) continue;
+      const len = Math.hypot(nx, ny, nz), light = Math.max(0, (-nx * 0.45 + ny * 0.85 + nz * 0.65) / len);
+      const grain = (pi + f[0]) & 1 ? -0.06 : 0.04;
+      faces.push({ d: f.reduce((s, i) => s - verts[i][0] + verts[i][1] * 0.75 + verts[i][2], 0) / 4, p: f.map((i) => ({ x: verts[i][3], y: verts[i][4] })), c: mechTone(pal[mat], 0.38 + light * 0.68 + grain, flash) });
+    }
+  }
+  faces.sort((a, b) => a.d - b.d);
+  for (const f of faces) {
+    g.fillStyle(f.c, alpha); g.fillPoints(f.p, true);
+    g.lineStyle(1.35, COLORS.ink, alpha * 0.9); g.strokePoints(f.p, true);
+  }
+  const energy = flash ? COLORS.white : pal[3];
+  if (pose === 'move') for (const x of [-7, 7]) {
+    const a = P(9, x, 49, -11), b = P(9, x, 46, -34 - frame * 6);
+    g.lineStyle(10, COLORS.ink, alpha); g.lineBetween(a[3], a[4], b[3], b[4]);
+    g.lineStyle(6, energy, alpha); g.lineBetween(a[3], a[4], b[3], b[4]);
+    g.lineStyle(2, COLORS.white, alpha); g.lineBetween(a[3], a[4], b[3], b[4]);
+  }
+  // Visor is permanent; the energy blade exists only during an attack pose.
+  const va = P(16, -5, 64, 7.3), vb = P(16, 5, 64, 7.3);
+  g.lineStyle(4, COLORS.ink, alpha); g.lineBetween(va[3], va[4], vb[3], vb[4]);
+  g.lineStyle(2.5, energy, alpha); g.lineBetween(va[3], va[4], vb[3], vb[4]);
+  if (blade) {
+    const sa = P(17, 18, 31, 3), sb = P(17, 18, 31, 28);
+    g.lineStyle(3, energy, alpha); g.lineBetween(sa[3], sa[4], sb[3], sb[4]);
+    g.lineStyle(1, COLORS.white, alpha); g.lineBetween(sa[3], sa[4], sb[3], sb[4]);
+  }
+}
+
+// Angular tactical plate with opposing cuts and a functional accent rail.
 function drawLabelSlab(g, x, y, w, h, color, selected) {
-  const k = 8;
-  const pts = [
-    { x: x + k, y },
-    { x: x + w + k, y },
-    { x: x + w, y: y + h },
-    { x, y: y + h },
-  ];
-  g.fillStyle(0x000000, 0.8);
-  g.fillPoints(
-    pts.map((p) => ({ x: p.x + 3, y: p.y + 3 })),
-    true,
-  );
-  g.fillStyle(selected ? color : 0x000000, selected ? 1 : 0.9);
+  const cut = Math.min(12, h * 0.35);
+  const pts = [{ x: x + cut, y }, { x: x + w, y }, { x: x + w - cut, y: y + h }, { x, y: y + h }, { x: x + 5, y: y + 5 }];
+  g.fillStyle(0x04090f, 0.94);
+  g.fillPoints(pts.map((p) => ({ x: p.x + 3, y: p.y + 4 })), true);
+  g.fillStyle(selected ? 0x142d38 : 0x0d1720, 0.96);
   g.fillPoints(pts, true);
-  g.lineStyle(1.5, selected ? COLORS.white : color, 1);
+  g.lineStyle(selected ? 2.5 : 1.2, selected ? color : 0x50616a, selected ? 1 : 0.72);
   g.strokePoints(pts, true);
+  g.lineStyle(selected ? 4 : 2, color, selected ? 1 : 0.5);
+  g.lineBetween(x + cut, y, x + Math.min(w * 0.42, 78), y);
 }
 
 function drawBolt(g, fx) {
@@ -1080,22 +1281,57 @@ function frontEdge(gx, gy, facing, at) {
   ];
 }
 
-function drawSweep(g, gx, gy, facing, color, a) {
-  const [p, q] = frontEdge(gx, gy, facing, 0.9);
-  const lift = 18;
-  g.lineStyle(6, color, 0.5 * a);
-  g.lineBetween(p.x, p.y - lift, q.x, q.y - lift);
-  g.lineStyle(2, COLORS.white, a);
-  g.lineBetween(p.x, p.y - lift, q.x, q.y - lift);
+function drawSweep(g, gx, gy, facing, color, a, kind) {
+  const c = toIso(gx, gy), v = dirVec(facing);
+  let arc;
+  if (kind === 'hslash') {
+    const side = dirVec(facing === 'N' || facing === 'S' ? 'E' : 'N');
+    arc = [
+      { x: c.x + v.x * 0.9 + side.x * 1.55, y: c.y + v.y * 0.9 + side.y * 1.55 - 20 },
+      { x: c.x + v.x * 1.8, y: c.y + v.y * 1.8 - 27 },
+      { x: c.x + v.x * 0.9 - side.x * 1.55, y: c.y + v.y * 0.9 - side.y * 1.55 - 20 },
+    ];
+  } else arc = [
+    { x: c.x + v.x * 0.25, y: c.y + v.y * 0.25 - 42 },
+    { x: c.x + v.x * 1.55, y: c.y + v.y * 1.55 - 26 },
+    { x: c.x + v.x * 3, y: c.y + v.y * 3 - 10 },
+  ];
+  g.lineStyle(12, COLORS.ink, 0.72 * a);
+  g.strokePoints(arc, false);
+  g.lineStyle(7, color, 0.7 * a);
+  g.strokePoints(arc, false);
+  g.lineStyle(2.5, COLORS.white, a);
+  g.strokePoints(arc, false);
+  const q = arc[2];
+  g.fillStyle(COLORS.white, a);
+  g.fillTriangle(q.x, q.y, q.x - 7, q.y - 5, q.x - 2, q.y + 6);
 }
 
 function drawGuard(g, gx, gy, facing, a) {
-  const [p, q] = frontEdge(gx, gy, facing, 0.5);
-  const quad = [p, q, { x: q.x, y: q.y - 30 }, { x: p.x, y: p.y - 30 }];
-  g.fillStyle(COLORS.white, 0.18 * a);
-  g.fillPoints(quad, true);
-  g.lineStyle(2, COLORS.white, a);
-  g.strokePoints(quad, true);
+  const [p, q] = frontEdge(gx, gy, facing, 0.52);
+  const shield = [{ x: p.x, y: p.y - 7 }, { x: q.x, y: q.y - 7 }, { x: q.x + 3, y: q.y - 28 }, { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 - 38 }, { x: p.x - 3, y: p.y - 28 }];
+  g.fillStyle(0x143c54, 0.38 * a);
+  g.fillPoints(shield, true);
+  g.lineStyle(7, COLORS.ink, 0.8 * a);
+  g.strokePoints(shield, false);
+  g.lineStyle(3, COLORS.p1, a);
+  g.strokePoints(shield, false);
+  g.lineStyle(1.5, COLORS.white, 0.9 * a);
+  g.lineBetween(shield[0].x + 3, shield[0].y - 3, shield[3].x, shield[3].y + 5);
+  g.lineBetween(shield[3].x, shield[3].y + 5, shield[1].x - 3, shield[1].y - 3);
+}
+
+function drawShards(g, x, y, color, a) {
+  for (let k = 0; k < 8; k++) {
+    const ang = k * 2.399 + 0.3;
+    const r = 19 + (k % 3) * 9;
+    const sx = x + Math.cos(ang) * r;
+    const sy = y + Math.sin(ang) * r * 0.65;
+    g.lineStyle(2, k & 1 ? color : COLORS.white, a * 0.7);
+    g.lineBetween(x, y, sx, sy);
+    g.fillStyle(k & 1 ? color : COLORS.white, a * (0.55 + (k % 2) * 0.35));
+    g.fillTriangle(sx, sy, sx - Math.cos(ang + 0.7) * 9, sy - Math.sin(ang + 0.7) * 6, sx - Math.cos(ang - 0.5) * 4, sy - Math.sin(ang - 0.5) * 4);
+  }
 }
 
 // == AUDIO ==
@@ -1139,7 +1375,7 @@ function createAudio(scene) {
     src.connect(out(vol));
     src.start();
   }
-  const arp = (notes) => notes.forEach((f, i) => setTimeout(() => tone(f, 0.16, 'square', 0.05), i * 130));
+  const arp = (notes) => notes.forEach((f, i) => trackDelay(scene, i * 130, () => tone(f, 0.16, 'square', 0.05)));
   return {
     tick: () => tone(440, 0.04, 'square', 0.03),
     blip: () => tone(660, 0.07, 'square', 0.04, 990),
@@ -1167,7 +1403,10 @@ const config = {
   width: W,
   height: H,
   parent: 'game-root',
-  backgroundColor: '#05060a',
+  backgroundColor: '#071019',
+  pixelArt: true,
+  antialias: false,
+  roundPixels: true,
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   scene: { create, update },
 };
@@ -1175,7 +1414,6 @@ const config = {
 new Phaser.Game(config);
 
 const hex = (n) => '#' + n.toString(16).padStart(6, '0');
-const MENU = [MOVE_ACTS, COMBAT_ACTS];
 const MENU_TITLES = ['MOVEMENT', 'COMBAT'];
 
 // Dynamic menu: adds a BURST row to COMBAT when the unit is KNOCKBACK with full guts.
@@ -1185,15 +1423,14 @@ function buildMenu(u) {
   return [MOVE_ACTS, combat];
 }
 const CARDS = [
-  ['CATATUMBO PROTOCOL', 'MECHA DUEL ON LAKE MARACAIBO'],
-  ['HOW TO PLAY  1/3', 'BOTH MECHS SECRETLY PICK\nONE ACTION AT THE SAME TIME'],
-  ['HOW TO PLAY  2/3', 'FASTER ACTIONS LAND FIRST\nGET HIT BEFORE YOU ACT = ACTION LOST\nTURNING TO STRIKE COSTS 40 SPEED'],
-  ['HOW TO PLAY  3/3', 'STRIKE EACH OTHER = SWORD CLASH\nPARRY > THRUST > FEINT > PARRY\nPARRY OPENS COMBO: STAGGER→KNOCK→DOWN'],
+  ['CATATUMBO PROTOCOL', 'MECHA DUEL // LAKE MARACAIBO'],
+  ['PROGRAM', 'PICK ONE ACTION\nSPEED RESOLVES FIRST'],
+  ['SWORD CLASH', 'PARRY > THRUST > FEINT > PARRY'],
 ];
 
 function txt(scene, x, y, size, color, originX = 0) {
   return scene.add
-    .text(x, y, '', { fontFamily: 'monospace', fontSize: size + 'px', fontStyle: 'bold', color, align: 'center' })
+    .text(x, y, '', { fontFamily: 'Arial Black, Impact, monospace', fontSize: size + 'px', fontStyle: 'bold', color, align: 'center', stroke: '#050b12', strokeThickness: size > 15 ? 2 : 1 })
     .setOrigin(originX, 0.5)
     .setDepth(10);
 }
@@ -1210,21 +1447,66 @@ function createUi(scene) {
     info: [txt(scene, W / 2, 22, 13, '#ffffff', 0.5), txt(scene, W / 2, 42, 10, '#c8ccd8', 0.5), txt(scene, W / 2, 56, 10, '#c8ccd8', 0.5)],
     phase: txt(scene, W / 2, H - 56, 16, '#ffffff', 0.5),
     hint: txt(scene, W / 2, H - 34, 11, '#9aa0b0', 0.5),
-    menu: [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => txt(scene, 0, 0, 12, '#ffffff', 0.5)),
-    title: txt(scene, W / 2, 140, 26, '#000000', 0.5).setDepth(11),
+    menu: Array.from({ length: 11 }, () => txt(scene, 0, 0, 12, '#ffffff', 0.5)),
+    title: txt(scene, W / 2, 140, 26, '#ffffff', 0.5).setDepth(11),
     sub: txt(scene, W / 2, 196, 13, '#ffffff', 0.5).setDepth(11),
   };
 }
 
+function setupCameras(s) {
+  const main = s.cameras.main;
+  s.camFocus = { x: WORLD_W / 2, y: ISO_OY };
+  s.hudCam = s.cameras.add ? s.cameras.add(0, 0, W, H) : { ignore() {} };
+  if (!s.cameras.add) return;
+  main.setBounds(0, 0, WORLD_W, WORLD_H).setDeadzone(64, 44).startFollow(s.camFocus, false, 0.09, 0.09);
+  const fixed = Object.values(s.ui).flat().filter((o) => !s.ui.tags.includes(o));
+  main.ignore([s.gUi, ...fixed]);
+  s.hudCam.ignore([s.gBg, s.gMap, s.gFx, s.gUnits, s.gTop, ...s.ui.tags]);
+}
+
+function updateCamera(s, snap) {
+  const cam = s.cameras.main;
+  if (!cam.setZoom) return;
+  let p, zoom;
+  if (s.mode === 'attract') {
+    p = toIso(12, 13);
+    zoom = 0.65;
+  } else if (s.phase === 'clash') {
+    p = toIso((s.view[0].gx + s.view[1].gx) / 2, (s.view[0].gy + s.view[1].gy) / 2);
+    zoom = 1.5;
+  } else {
+    const u = s.view[0], d = dirVec(u.facing);
+    p = toIso(u.gx, u.gy);
+    p.x += d.x * 2;
+    p.y += d.y * 2 - 32;
+    zoom = 1.42;
+  }
+  s.camFocus.x = p.x;
+  s.camFocus.y = p.y;
+  cam.setZoom(snap ? zoom : cam.zoom + (zoom - cam.zoom) * 0.08);
+  if (snap) cam.centerOn(p.x, p.y);
+}
+
+function screenPoint(s, p) {
+  const c = s.cameras.main;
+  return c.worldView ? { x: (p.x - c.worldView.x) * c.zoom, y: (p.y - c.worldView.y) * c.zoom } : p;
+}
+
 function create() {
   this.controls = createControls(this);
-  drawBackground(this.add.graphics());
-  drawMap(this.add.graphics());
+  this.gBg = this.add.graphics();
+  drawBackground(this.gBg);
+  this.gMap = this.add.graphics();
+  drawMap(this.gMap);
   this.gFx = this.add.graphics();
   this.gUnits = this.add.graphics();
   this.gTop = this.add.graphics();
   this.gUi = this.add.graphics();
   this.ui = createUi(this);
+  setupCameras(this);
+  this.ownTimers = [];
+  this.ownTweens = [];
+  this.floaters = [];
   this.sfx = createAudio(this);
   this.token = 0;
   this.attractStart = 0;
@@ -1233,6 +1515,7 @@ function create() {
 
 function update(time, delta) {
   handleInput(this, time);
+  updateCamera(this);
   drawWorld(this, time, delta);
   drawHud(this, time);
 }
@@ -1243,22 +1526,58 @@ function clearPressed(controls) {
   for (const k in controls.pressed) controls.pressed[k] = false;
 }
 
+function trackDelay(s, ms, fn, onCancel) {
+  const entry = { done: false, ev: null };
+  const remove = () => {
+    const i = s.ownTimers.indexOf(entry);
+    if (i >= 0) s.ownTimers.splice(i, 1);
+  };
+  entry.run = () => {
+    if (entry.done) return;
+    entry.done = true;
+    remove();
+    fn();
+  };
+  entry.cancel = () => {
+    if (entry.done) return;
+    entry.done = true;
+    if (entry.ev && entry.ev.remove) entry.ev.remove(false);
+    remove();
+    if (onCancel) onCancel();
+  };
+  entry.ev = s.time.delayedCall(ms, entry.run);
+  s.ownTimers.push(entry);
+  return entry;
+}
+
 function wait(s, ms) {
-  return new Promise((res) => s.time.delayedCall(ms, res));
+  return new Promise((res) => trackDelay(s, ms, res, res));
+}
+
+function clearAsync(s) {
+  (s.ownTimers || []).slice().forEach((e) => e.cancel());
+  (s.ownTweens || []).slice().forEach((e) => e.cancel());
+  (s.floaters || []).slice().forEach((t) => t.destroy && t.destroy());
+  s.ownTimers = [];
+  s.ownTweens = [];
+  s.floaters = [];
 }
 
 function resetMatch(s, mode) {
+  clearAsync(s);
   s.token++;
   s.mode = mode;
   s.state = newState();
-  s.view = s.state.units.map((u) => ({ gx: u.x, gy: u.y, facing: u.facing, st: 0, flash: 0 }));
+  s.view = s.state.units.map((u) => ({ gx: u.x, gy: u.y, facing: u.facing, st: 0, flash: 0, pose: 'idle', frame: 0 }));
   s.dispHp = [HP_MAX, HP_MAX];
   s.fx = [];
   s.lastP1Pick = null;
   s.clashResolve = null;
+  s.throwResolve = null;
   s.menuPos = { col: 0, row: 0 };
   if (mode === 'attract') s.attractStart = s.time.now;
   beginTurn(s);
+  updateCamera(s, true);
 }
 
 function beginTurn(s) {
@@ -1280,7 +1599,10 @@ function beginTurn(s) {
   s.p1Plan = play ? null : cpuPlan(s.state, 0);
   s.phase = s.p1Plan ? 'locked' : 'choose';
   s.deadline = now + TURN_MS;
-  s.sel = { act: buildMenu(s.state.units[0])[s.menuPos.col][s.menuPos.row], dir: s.state.units[0].facing, cur: null };
+  const menu = buildMenu(s.state.units[0]);
+  s.menuPos.col = Math.max(0, Math.min(1, s.menuPos.col));
+  s.menuPos.row = Math.max(0, Math.min(menu[s.menuPos.col].length - 1, s.menuPos.row));
+  s.sel = { act: menu[s.menuPos.col][s.menuPos.row], dir: s.state.units[0].facing, cur: null };
 }
 
 function lockP1(s, plan) {
@@ -1293,7 +1615,7 @@ function lockP1(s, plan) {
 function startAim(s) {
   const me = s.state.units[0];
   const a = ACTIONS[s.sel.act];
-  if (!a || !canUse(me, s.sel.act)) return s.sfx.tick();
+  if (!a || (me.st !== ST_NORMAL && s.sel.act !== 'burst') || !canUse(me, s.sel.act)) return s.sfx.tick();
   // BURST / WAIT have no aim step — lock immediately.
   if (a.target === 'none') {
     if (s.sel.act === 'burst') {
@@ -1373,7 +1695,8 @@ function handleInput(s, time) {
   }
   if (s.phase !== 'choose' && s.phase !== 'aim') return;
 
-  if (s.state.units[0].st !== ST_NORMAL) {
+  const canBurst = s.state.units[0].st === ST_KNOCKBACK && canUse(s.state.units[0], 'burst');
+  if (s.state.units[0].st !== ST_NORMAL && !canBurst) {
     if (time > s.phaseStart + STUN_SHOW_MS) lockP1(s, WAIT_PLAN);
     return;
   }
@@ -1446,20 +1769,19 @@ async function lockTurn(s) {
     s.state = c.state;
   }
 
-  // Zone events: check each unit's tile after all actions resolve.
+  // Zone events: check both final tiles, then adjudicate without advancing twice.
   if (!s.state.over) {
     const zEvents = [];
     resolveZone(s.state, 0, zEvents);
     resolveZone(s.state, 1, zEvents);
+    checkOutcome(s.state);
     if (zEvents.length && !(await playEvents(s, zEvents, token))) return;
-    s.state = zEvents.reduce((st) => st, s.state);
-    s.dispHp = s.state.units.map((u) => u.hp);
   }
 
   s.dispHp = s.state.units.map((u) => u.hp);
   s.view.forEach((v, i) => {
     const u = s.state.units[i];
-    Object.assign(v, { gx: u.x, gy: u.y, facing: u.facing, st: u.st });
+    Object.assign(v, { gx: u.x, gy: u.y, facing: u.facing, st: u.st, pose: 'idle', frame: 0 });
   });
   await wait(s, 450);
   if (token === s.token) beginTurn(s);
@@ -1496,10 +1818,23 @@ function askClash(s) {
   });
 }
 
-function tweenTo(s, o, x, y, ms, yoyo) {
-  return new Promise((res) =>
-    s.tweens.add({ targets: o, gx: x, gy: y, duration: ms, yoyo: !!yoyo, ease: 'Sine.easeInOut', onComplete: res }),
-  );
+function tweenTo(s, o, x, y, ms) {
+  return new Promise((res) => {
+    const entry = { done: false, tw: null };
+    const finish = () => {
+      if (entry.done) return;
+      entry.done = true;
+      const i = s.ownTweens.indexOf(entry);
+      if (i >= 0) s.ownTweens.splice(i, 1);
+      res();
+    };
+    entry.cancel = () => {
+      if (entry.tw && entry.tw.stop) entry.tw.stop();
+      finish();
+    };
+    entry.tw = s.tweens.add({ targets: o, gx: x, gy: y, duration: ms, ease: 'Sine.easeInOut', onComplete: finish });
+    s.ownTweens.push(entry);
+  });
 }
 
 function addFx(s, fx) {
@@ -1520,7 +1855,24 @@ function floatText(s, o, str, color, size = 15, life = 1000) {
     })
     .setOrigin(0.5)
     .setDepth(12);
-  s.tweens.add({ targets: t, y: t.y - 26, alpha: 0, delay: life * 0.4, duration: life * 0.6, onComplete: () => t.destroy() });
+  s.hudCam.ignore(t);
+  s.floaters.push(t);
+  const entry = { done: false, tw: null };
+  const finish = () => {
+    if (entry.done) return;
+    entry.done = true;
+    let i = s.ownTweens.indexOf(entry);
+    if (i >= 0) s.ownTweens.splice(i, 1);
+    i = s.floaters.indexOf(t);
+    if (i >= 0) s.floaters.splice(i, 1);
+    t.destroy();
+  };
+  entry.cancel = () => {
+    if (entry.tw && entry.tw.stop) entry.tw.stop();
+    finish();
+  };
+  entry.tw = s.tweens.add({ targets: t, y: t.y - 26, alpha: 0, delay: life * 0.4, duration: life * 0.6, onComplete: finish });
+  s.ownTweens.push(entry);
 }
 
 const actLabel = (i) => (i ? 'CPU ' : 'P1 ');
@@ -1529,7 +1881,8 @@ const actLabel = (i) => (i ? 'CPU ' : 'P1 ');
 async function playEvents(s, events, token) {
   const v = s.view;
   const shake = (ms, k) => s.cameras.main.shake(ms, k);
-  for (const e of events) {
+  for (let ei = 0; ei < events.length; ei++) {
+    const e = events[ei];
     if (token !== s.token) return false;
     const u = v[e.who];
     if (e.t === 'order') {
@@ -1544,9 +1897,27 @@ async function playEvents(s, events, token) {
       u.facing = e.facing;
       await wait(s, 120);
     } else if (e.t === 'move') {
-      s.sfx.move();
-      for (const c of e.path) await tweenTo(s, u, c.x, c.y, STEP_MS);
-      u.facing = e.facing;
+      // Consecutive moves in a beat animate together.
+      let end = ei;
+      while (end < events.length && events[end].t === 'move') end++;
+      const batch = events.slice(ei, end);
+      batch.forEach(() => s.sfx.move());
+      await Promise.all(batch.map(async (m) => {
+        const mover = v[m.who], thrust = m.act === 'move' || m.act === 'lunge';
+        const steps = m.path.length * 3;
+        let n = 0;
+        if (thrust) { mover.pose = 'move'; mover.facing = m.facing; }
+        for (const c of m.path) {
+          const x = mover.gx, y = mover.gy;
+          for (let f = 0; f < 3; f++, n++) {
+            if (thrust) mover.frame = n === 0 ? 0 : n === steps - 1 ? 2 : 1;
+            await tweenTo(s, mover, x + (c.x - x) * (f + 1) / 3, y + (c.y - y) * (f + 1) / 3, STEP_MS / 3);
+          }
+        }
+        mover.facing = m.facing;
+        mover.pose = 'idle'; mover.frame = 0;
+      }));
+      ei = end - 1;
     } else if (e.t === 'bump') {
       floatText(s, u, 'BLOCKED', COLORS.white, 12);
       await wait(s, 300);
@@ -1558,19 +1929,30 @@ async function playEvents(s, events, token) {
       (e.tiles && e.tiles.length ? e.tiles : [{ x: e.x, y: e.y }]).forEach((t) =>
         addFx(s, { kind: 'cell', x: t.x, y: t.y, color: unitColor(e.who), dur: 450 }),
       );
-      if (e.t !== 'grab') addFx(s, { kind: 'sweep', who: e.who, dur: 350 });
-      s.sfx.swing();
-      await wait(s, 260);
+      const slash = e.t === 'vslash' || e.t === 'hslash', attack = slash || e.t === 'lunge';
+      if (attack) {
+        u.pose = slash ? e.t : 'vslash'; u.frame = 0;
+        await wait(s, slash ? 140 : 90);
+        u.frame = 1;
+        addFx(s, { kind: 'sweep', who: e.who, act: e.t, dur: slash ? 220 : 200 });
+        s.sfx.swing();
+        await wait(s, 90);
+        u.frame = 2;
+        await wait(s, slash ? 110 : 70);
+        u.pose = 'idle'; u.frame = 0;
+      } else await wait(s, 260);
     } else if (e.t === 'miss') {
       floatText(s, u, 'MISS', 0x9aa0b0, 14);
       await wait(s, 350);
     } else if (e.t === 'hit') {
       u.flash = 1;
+      const hitAt = toIso(u.gx, u.gy);
+      addFx(s, { kind: 'shards', x: hitAt.x, y: hitAt.y - 30, color: e.who ? COLORS.cpu : COLORS.p1, dur: 380 });
       s.dispHp[e.who] = Math.max(0, s.dispHp[e.who] - e.dmg);
-      const dmgText = '-' + e.dmg + (e.flank ? ' FLANK!' : '') + (e.slam ? ' SLAM!' : '');
+      const dmgText = 'HIT!! -' + e.dmg + (e.flank ? ' FLANK!' : '') + (e.slam ? ' SLAM!' : '');
       floatText(s, u, dmgText, COLORS.white, 17);
       // Combo bonus: if the target was in a non-normal stance, shout it.
-      const targetSt = s.state && s.state.units[e.who] ? s.state.units[e.who].st : 0;
+      const targetSt = e.prevSt || ST_NORMAL;
       if (targetSt > ST_NORMAL) floatText(s, u, 'COMBO!', COLORS.bolt, 14);
       shake(140, 0.008);
       s.sfx.hit();
@@ -1595,23 +1977,35 @@ async function playEvents(s, events, token) {
     } else if (e.t === 'momentum') {
       floatText(s, u, 'MOMENTUM', COLORS.bolt, 13);
     } else if (e.t === 'burst') {
+      u.st = ST_NORMAL;
       floatText(s, u, 'BURST!', COLORS.bolt, 17);
       addFx(s, { kind: 'flash', dur: 120 });
       s.sfx.clash();
       await wait(s, 300);
     } else if (e.t === 'stance') {
-      const stColors = [0, COLORS.bolt, COLORS.cpu, COLORS.white];
-      const stLabel = ['', 'STAGGERED', 'KNOCKBACK', 'DOWN'][e.st];
+      u.st = e.st;
+      const stColors = [COLORS.coast, COLORS.bolt, COLORS.cpu, COLORS.white];
+      const stLabel = ['RECOVERED', 'STAGGERED', 'KNOCKBACK', 'DOWN'][e.st];
       addFx(s, { kind: 'flash', color: stColors[e.st] || COLORS.white, dur: 180 });
       if (stLabel) floatText(s, u, stLabel, stColors[e.st] || COLORS.white, 16);
       await wait(s, 250);
     } else if (e.t === 'zone') {
-      const zLabel = e.zone + (e.dmg ? ' -' + e.dmg : '') + (e.guts ? ' +1 GUTS' : '') + (e.push ? ' SLIP!' : '') + (e.st ? ' ' + ['', 'STAGGERED', 'KNOCKBACK', 'DOWN'][e.st] : '');
+      const zLabel = e.zone + (e.dmg ? ' -' + e.dmg : '') + (e.guts ? ' +1 GUTS' : '') + (e.push ? ' SLIP!' : '') + (e.st ? ' ' + ST_NAME[e.st] : '');
+      if (e.zone === 'CAT') {
+        const strike = toIso(u.gx, u.gy);
+        addFx(s, { kind: 'bolt', pts: makeBoltPoints(strike.x, strike.y - 22), dur: 500 });
+        addFx(s, { kind: 'shards', x: strike.x, y: strike.y - 20, color: COLORS.bolt, dur: 420 });
+      }
       floatText(s, u, zLabel, e.color || COLORS.bolt, 14);
       if (e.dmg) {
+        s.dispHp[e.who] = Math.max(0, s.dispHp[e.who] - e.dmg);
         u.flash = 0.6;
         shake(100, 0.006);
         s.sfx.hit();
+      }
+      if (e.st !== undefined) u.st = e.st;
+      if (e.path && e.path.length) {
+        for (const c of e.path) await tweenTo(s, u, c.x, c.y, STEP_MS * 0.7);
       }
       if (e.guts) s.sfx.blip();
       addFx(s, { kind: 'flash', color: e.color || COLORS.bolt, dur: 100 });
@@ -1619,10 +2013,11 @@ async function playEvents(s, events, token) {
     } else if (e.t === 'clash' || e.t === 'mirror') {
       const m = toIso((v[0].gx + v[1].gx) / 2, (v[0].gy + v[1].gy) / 2);
       addFx(s, { kind: 'bolt', pts: makeBoltPoints(m.x, m.y - 24), dur: 550 });
+      addFx(s, { kind: 'shards', x: m.x, y: m.y - 24, color: COLORS.cpu, dur: 520 });
       addFx(s, { kind: 'flash', dur: 180 });
       shake(220, 0.012);
       s.sfx.clash();
-      s.banner = e.t === 'clash' ? 'SWORD CLASH!' : 'MIRROR!  BOTH KNOCKED BACK';
+      s.banner = e.t === 'clash' ? 'CLASH!!' : 'MIRROR!  BOTH KNOCKED BACK';
       await wait(s, CLASH_PAUSE_MS);
     } else if (e.t === 'clashWin') {
       floatText(s, u, 'WINS CLASH', unitColor(e.who), 17);
@@ -1640,8 +2035,10 @@ function drawWorld(s, time, delta) {
   const flicker = Math.random() < 0.06 ? 0.35 : 0.08 + 0.05 * Math.sin(time / 300);
   for (let y = 0; y < ROWS; y++) {
     for (let x = 0; x < COLS; x++) {
-      if (tileAt(x, y) !== 4) continue;
-      g.fillStyle(COLORS.bolt, flicker);
+      const zone = ZONE_TILES[tileAt(x, y)];
+      if (!zone) continue;
+      const pulse = zone === 'cat' ? flicker : 0.07 + 0.06 * Math.sin(time / 250 + x + y);
+      g.fillStyle(ZONE_COLOR[zone], pulse);
       g.fillPoints(cellPts(x, y), true);
     }
   }
@@ -1651,13 +2048,14 @@ function drawWorld(s, time, delta) {
   const me = s.state.units[0];
   const play = s.mode === 'play';
   const blink = 0.5 + 0.5 * Math.sin(time / 90);
-  if (play && (s.phase === 'choose' || s.phase === 'aim') && me.st === ST_NORMAL) {
+  const planning = me.st === ST_NORMAL || (me.st === ST_KNOCKBACK && canUse(me, 'burst'));
+  if (play && (s.phase === 'choose' || s.phase === 'aim') && planning) {
     const sel = s.sel;
     const a = ACTIONS[sel.act];
     if (s.phase === 'aim' && a.target === 'tile') {
       for (const path of sel.valid.values()) {
         const t = path[path.length - 1];
-        drawCell(g, t.x, t.y, COLORS.coast, 0.12, 0.45);
+        drawCell(g, t.x, t.y, 0x43f08a, 0.14, 0.65);
       }
       const path = sel.valid.get(sel.cur.x + ',' + sel.cur.y);
       if (path) {
@@ -1710,12 +2108,15 @@ function drawWorld(s, time, delta) {
   const order = s.view.map((v, i) => ({ v, i })).sort((a, b) => a.v.gy - a.v.gx - (b.v.gy - b.v.gx));
   for (const { v, i } of order) {
     v.flash = Math.max(0, v.flash - delta / 250);
-    if (i === 0 && ghost) drawMecha(gu, ghost.x, ghost.y, ghost.facing, COLORS.p1, 0.35, 0, 0);
-    drawMecha(gu, v.gx, v.gy, v.facing, unitColor(i), 1, v.flash, v.st);
+    if (i === 0 && ghost) drawMecha(gu, ghost.x, ghost.y, ghost.facing, COLORS.p1, 0.35, 0, 0, 'idle', 0);
+    drawMecha(gu, v.gx, v.gy, v.facing, unitColor(i), 1, v.flash, v.st, v.pose, v.frame);
     const p = toIso(v.gx, v.gy);
-    drawMiniBar(gu, p.x, p.y + 12, s.dispHp[i] / HP_MAX, unitColor(i));
-    s.ui.tags[i].setPosition(p.x, p.y + 25);
-    const stName = ['P1', 'CPU'][i] + (v.st ? '  ' + ['', 'STAGGERED', 'KNOCKBACK', 'DOWN'][v.st] : '');
+    const n = s.view[1 - i];
+    const near = Math.abs(v.gx - n.gx) + Math.abs(v.gy - n.gy) < 3;
+    const off = near ? Math.sign(v.gx + v.gy - n.gx - n.gy || i * 2 - 1) * 22 : 0;
+    drawMiniBar(gu, p.x + off, p.y + 12, s.dispHp[i] / HP_MAX, unitColor(i));
+    s.ui.tags[i].setPosition(p.x + off, p.y + 25);
+    const stName = ['P1', 'CPU'][i] + (v.st ? '  ' + ST_NAME[v.st] : '');
     setT(s.ui.tags[i], stName);
     const ready = i === 0 ? !!s.p1Plan && s.phase === 'locked' : s.phase === 'locked' || (play && (s.phase === 'choose' || s.phase === 'aim') && time > s.cpuReadyAt);
     if (ready) drawCheck(gu, p.x + 16, p.y - 50, unitColor(i));
@@ -1723,13 +2124,22 @@ function drawWorld(s, time, delta) {
 
   const gt = s.gTop;
   gt.clear();
+  if (play) {
+    const p = toIso(s.view[1].gx, s.view[1].gy);
+    const r = 27 + blink * 3;
+    gt.lineStyle(2, COLORS.cpu, 0.4 + blink * 0.5);
+    gt.strokeCircle(p.x, p.y - 30, r);
+    gt.lineBetween(p.x - r - 7, p.y - 30, p.x - r + 5, p.y - 30);
+    gt.lineBetween(p.x + r - 5, p.y - 30, p.x + r + 7, p.y - 30);
+  }
   s.fx = s.fx.filter((f) => f.until > time);
   for (const f of s.fx) {
     const a = Math.min(1, (f.until - time) / Math.min(f.dur, 400));
     if (f.kind === 'bolt') drawBolt(gt, { pts: f.pts, until: f.until, now: time, dur: f.dur });
     else if (f.kind === 'cell') drawCell(gt, f.x, f.y, f.color, 0.4 * a, a);
-    else if (f.kind === 'sweep') drawSweep(gt, s.view[f.who].gx, s.view[f.who].gy, s.view[f.who].facing, unitColor(f.who), a);
+    else if (f.kind === 'sweep') drawSweep(gt, s.view[f.who].gx, s.view[f.who].gy, s.view[f.who].facing, unitColor(f.who), a, f.act);
     else if (f.kind === 'guard') drawGuard(gt, s.view[f.who].gx, s.view[f.who].gy, s.view[f.who].facing, a);
+    else if (f.kind === 'shards') drawShards(gt, f.x, f.y, f.color, a);
     else if (f.kind === 'flash') {
       gt.fillStyle(f.color || COLORS.white, 0.35 * a);
       gt.fillRect(0, 0, W, H);
@@ -1737,123 +2147,170 @@ function drawWorld(s, time, delta) {
   }
 }
 
-const CLASH_OPTS = ['B1 THRUST', 'B2 PARRY', 'B3 FEINT'];
-
 function drawHud(s, time) {
   const g = s.gUi;
   const ui = s.ui;
   g.clear();
   const units = s.state.units;
   const play = s.mode === 'play';
+  const arc = (x, y, r, a, b, color, width, alpha = 1) => {
+    g.lineStyle(width, color, alpha);
+    g.beginPath();
+    g.arc(x, y, r, a, b, false);
+    g.strokePath();
+  };
 
-  // Corner panels: name + HP, segmented HP, energy pips, status.
+  // Compact opposing pilot panels with one thick, legible HP rail.
   [0, 1].forEach((i) => {
     const color = unitColor(i);
-    const x0 = i ? W - 262 : 12;
-    drawLabelSlab(g, x0, 10, 242, 62, color, false);
+    const x0 = i ? W - 234 : 12;
     const u = units[i];
-    for (let k = 0; k < 10; k++) {
-      const on = s.dispHp[i] > k * (HP_MAX / 10);
-      const sx = i ? W - 50 - k * 20 : 30 + k * 20;
-      g.fillStyle(color, on ? 1 : 0.15);
-      g.fillRect(sx, 37, 16, 8);
-    }
+    drawLabelSlab(g, x0, 9, 222, 56, color, false);
+    const bx = x0 + 12;
+    const bw = 198;
+    const hp = Math.max(0, s.dispHp[i]) / HP_MAX;
+    g.fillStyle(0x02070c, 1);
+    g.fillRect(bx, 34, bw, 11);
+    g.fillStyle(color, 0.95);
+    if (i) g.fillRect(bx + bw * (1 - hp), 35, bw * hp, 9);
+    else g.fillRect(bx, 35, bw * hp, 9);
+    g.lineStyle(1, COLORS.ink, 0.9);
+    for (let k = 1; k < 10; k++) g.lineBetween(bx + (bw * k) / 10, 35, bx + (bw * k) / 10, 44);
     for (let k = 0; k < GUTS_MAX; k++) {
-      const px = i ? W - 38 - k * 16 : 38 + k * 16;
-      g.fillStyle(COLORS.bolt, u.guts > k ? 1 : 0.15);
-      g.fillPoints(rhombus(px, 58, 6, 6), true);
+      const px = i ? x0 + 202 - k * 14 : x0 + 18 + k * 14;
+      g.fillStyle(COLORS.bolt, u.guts > k ? 1 : 0.16);
+      g.fillPoints(rhombus(px, 56, 5, 5), true);
+      g.lineStyle(1, COLORS.bolt, 0.55);
+      g.strokePoints(rhombus(px, 56, 5, 5), true);
     }
-    setT(ui.names[i], (i ? 'CPU' : 'P1') + '  HP ' + Math.max(0, s.dispHp[i]));
-    const stLabel = ['', 'STAGGERED', 'KNOCKBACK', 'DOWN'][u.st] || '';
-    const tags = [stLabel, u.momentum && 'MOMENTUM', u.guts >= GUTS_MAX && 'BURST READY'];
-    setT(ui.status[i], (stLabel ? 'GUTS  ' : '') + tags.filter(Boolean).join('  '));
+    ui.names[i].setPosition(i ? W - 28 : 28, 21);
+    ui.status[i].setPosition(i ? W - 84 : 84, 57);
+    setT(ui.names[i], (i ? 'CPU CABIMAS' : 'P1 MARACAIBO') + ' // HP ' + Math.max(0, s.dispHp[i]));
+    const stLabel = ST_NAME[u.st] || '';
+    setT(ui.status[i], [stLabel, u.momentum && 'MOMENTUM', u.guts >= GUTS_MAX && 'BURST READY'].filter(Boolean).join(' // '));
   });
 
-  // Info panel (top centre): what the highlighted action does.
+  // Reserved top-centre action telemetry, clear of both HP panels.
   let info = ['', '', ''];
-  const aiming = play && (s.phase === 'choose' || s.phase === 'aim') && !units[0].stunned;
+  const canBurstNow = units[0].st === ST_KNOCKBACK && canUse(units[0], 'burst');
+  const aiming = play && (s.phase === 'choose' || s.phase === 'aim') && (units[0].st === ST_NORMAL || canBurstNow);
   if (aiming) {
     const a = ACTIONS[s.sel.act];
     const plan = selPlan(s) || { act: s.sel.act, dir: units[0].facing };
-    info = canUse(units[0], s.sel.act)
-      ? [a.name + '   SPD ' + speedOf(units[0], plan), a.info[0], a.info[1]]
-      : [a.name + '   LOCKED', 'NEEDS MOMENTUM:', 'MOVE 2 TILES THE TURN BEFORE'];
-    drawLabelSlab(g, W / 2 - 134, 10, 260, 58, COLORS.white, false);
+    const available = (units[0].st === ST_NORMAL || s.sel.act === 'burst') && canUse(units[0], s.sel.act);
+    info = available
+      ? [a.name + '  //  SPD ' + speedOf(units[0], plan), a.info[0], a.info[1]]
+      : [a.name + '  //  LOCKED', units[0].st === ST_NORMAL ? 'NEEDS MOMENTUM' : 'ONLY BURST BREAKS KNOCKBACK', units[0].st === ST_NORMAL ? 'MOVE FORWARD 3 TILES THE TURN BEFORE' : 'FULL GUTS REQUIRED'];
+    drawLabelSlab(g, 244, 9, 312, 56, COLORS.p1, false);
   }
   info.forEach((t, k) => setT(ui.info[k], t));
 
-  // Phase label + hints + timer.
+  // Phase/hint copy remains input-accurate; the rail keeps it off the board.
   let phase = '';
   let hint = '';
   if (play && aiming && s.phase === 'choose') {
-    phase = 'TURN ' + s.state.turn + '  PICK AN ACTION';
-    hint = 'STICK CHOOSE   B1 SELECT';
+    phase = 'TURN ' + s.state.turn + '  //  PICK AN ACTION';
+    hint = 'LEFT/RIGHT CATEGORY   UP/DOWN ACTION   B1 SELECT';
   } else if (play && aiming) {
-    phase = 'AIM ' + ACTIONS[s.sel.act].name;
+    phase = 'AIM // ' + ACTIONS[s.sel.act].name;
     hint = 'STICK AIM   B1 CONFIRM   B2 BACK';
   } else if (play && s.phase === 'choose' && units[0].st !== ST_NORMAL) {
-    const stName = ['', 'STAGGERED', 'KNOCKBACK', 'DOWN'][units[0].st];
-    phase = stName;
+    phase = ST_NAME[units[0].st];
     hint = 'CANNOT ACT THIS TURN';
   } else if (play && s.phase === 'locked') {
-    phase = 'LOCKED IN';
-    hint = time > s.cpuReadyAt ? 'BOTH READY' : 'WAITING FOR CPU...';
+    phase = 'COMMAND LOCKED';
+    hint = time > s.cpuReadyAt ? 'BOTH PILOTS READY' : 'ENEMY COMMAND ENCRYPTED...';
   } else if (play && s.phase === 'clash') {
-    phase = 'SWORD CLASH!  PICK FAST';
+    phase = 'SWORD CLASH // PICK FAST';
     hint = 'PARRY > THRUST > FEINT > PARRY   BURST BEATS THRUST + FEINT';
   } else if (play && s.phase === 'throw') {
-    phase = 'CAUGHT!  THROW';
-    hint = 'STICK AIM   B1 THROW   (INTO LAND = +10)';
-  } else if (s.phase === 'resolve') {
-    phase = s.banner;
-  }
+    phase = 'TARGET CAPTURED // THROW';
+    hint = 'STICK AIM   B1 THROW   IMPACT LAND FOR +10';
+  } else if (s.phase === 'resolve') phase = s.banner;
   setT(ui.phase, play ? phase : '');
   setT(ui.hint, hint);
 
-  // Menu slabs (two columns around P1) or clash slabs.
   const items = [];
   if (play && aiming && s.phase === 'choose') {
-    const p = toIso(s.view[0].gx, s.view[0].gy);
+    const p = screenPoint(s, toIso(s.view[0].gx, s.view[0].gy));
+    const cx = Math.max(170, Math.min(W - 170, p.x));
+    const cy = Math.max(160, Math.min(H - 165, p.y - 34));
+    // Compact tactical dial; labels carry the command hierarchy.
     const fullMenu = buildMenu(units[0]);
-    fullMenu.forEach((col, ci) => {
-      const x = Math.max(70, Math.min(W - 70, p.x + (ci ? 90 : -90)));
-      items.push({ x, y: p.y - 112, label: MENU_TITLES[ci], header: true });
-      col.forEach((act, ri) => {
-        const on = s.menuPos.col === ci && s.menuPos.row === ri;
-        items.push({ x, y: p.y - 86 + ri * 26, label: ACTIONS[act].name, on, off: !canUse(units[0], act) });
-      });
+    items.push({ kind: 'cat', x: cx - 112, y: cy - 76, label: MENU_TITLES[0], on: s.menuPos.col === 0 });
+    items.push({ kind: 'cat', x: cx + 112, y: cy - 76, label: MENU_TITLES[1], on: s.menuPos.col === 1 });
+    const col = fullMenu[s.menuPos.col];
+    const side = s.menuPos.col ? 1 : -1;
+    const ax = Math.max(68, Math.min(W - 68, cx + side * 128));
+    const y0 = Math.max(118, Math.min(H - 177 - col.length * 22, cy - ((col.length - 1) * 22) / 2));
+    arc(cx, cy - 8, 112, side > 0 ? -1 : 2.1, side > 0 ? 1 : 4.2, COLORS.p1, 2, 0.4);
+    col.forEach((act, ri) => {
+      const d = ri - (col.length - 1) / 2;
+      items.push({ kind: 'act', x: ax - side * d * d * 4, y: y0 + ri * 24, label: ACTIONS[act].name, on: s.menuPos.row === ri, off: !canUse(units[0], act) });
     });
   } else if (play && s.phase === 'clash') {
-    const p = toIso((s.view[0].gx + s.view[1].gx) / 2, (s.view[0].gy + s.view[1].gy) / 2);
-    const opts = units[0].guts >= GUTS_MAX ? [...CLASH_OPTS, 'B4 BURST'] : CLASH_OPTS;
-    opts.forEach((label, k) => items.push({ x: Math.min(W - 70, p.x + 110), y: p.y - 90 + k * 28, label, clash: true }));
+    const p = screenPoint(s, toIso((s.view[0].gx + s.view[1].gx) / 2, (s.view[0].gy + s.view[1].gy) / 2));
+    const cx = Math.max(120, Math.min(W - 120, p.x));
+    const cy = Math.max(150, Math.min(H - 170, p.y - 26));
+    arc(cx, cy, 62, -2.8, 0.35, 0x2d0713, 16, 0.82);
+    arc(cx, cy, 62, -2.8, 0.35, COLORS.cpu, 4, 1);
+    arc(cx, cy, 79, -0.15, 2.65, COLORS.cpu, 3, 0.65);
+    drawShards(g, cx, cy, COLORS.cpu, 0.9);
+    const opts = units[0].guts >= GUTS_MAX ? ['THRUST', 'PARRY', 'FEINT', 'BURST'] : ['THRUST', 'PARRY', 'FEINT'];
+    const side = cx < 530 ? 1 : -1;
+    const cardX = side > 0 ? Math.min(W - 174, cx + 88) : Math.max(14, cx - 262);
+    const cardY = Math.max(100, Math.min(H - 170 - opts.length * 43, cy - 83));
+    opts.forEach((name, k) => {
+      const x = cardX + (k % 2 ? 13 : 0) * side;
+      const y = cardY + k * 43;
+      const w = 160;
+      const cut = 17 + (k % 2) * 8;
+      const card = side > 0
+        ? [{ x: x + cut, y }, { x: x + w, y: y + 4 }, { x: x + w - 12, y: y + 38 }, { x, y: y + 34 }]
+        : [{ x, y: y + 4 }, { x: x + w - cut, y }, { x: x + w, y: y + 34 }, { x: x + 12, y: y + 38 }];
+      g.fillStyle(0x010308, 0.97);
+      g.fillPoints(card, true);
+      g.lineStyle(4, COLORS.cpu, 1);
+      g.strokePoints(card, true);
+      g.lineStyle(1.5, 0xff91a9, 0.8);
+      g.lineBetween(x + 15, y + 32, x + 113, y + 35);
+      items.push({ kind: 'clash', x: x + 76, y: y + 18, label: name });
+      items.push({ kind: 'key', x: x + 137, y: y + 20, label: 'B' + (k + 1) });
+    });
   }
+
   ui.menu.forEach((t, k) => {
     const it = items[k];
     t.setVisible(!!it);
     if (!it) return;
-    if (!it.header) drawLabelSlab(g, it.x - 52, it.y - 10, 100, 20, it.clash ? COLORS.cpu : COLORS.p1, !!it.on);
-    t.setColor(it.on ? '#000000' : it.header ? hex(COLORS.p1) : it.off ? '#5a6070' : '#ffffff');
+    // Pool objects stay API-minimal for the cabinet harness; geometry carries hierarchy.
+    if (it.kind === 'cat') drawLabelSlab(g, it.x - 47, it.y - 11, 94, 22, COLORS.p1, it.on);
+    if (it.kind === 'act') drawLabelSlab(g, it.x - (it.on ? 59 : 52), it.y - 10, it.on ? 118 : 104, 20, COLORS.p1, it.on);
+    t.setColor(it.on || it.kind === 'clash' ? '#ffffff' : it.kind === 'key' ? '#ff9ab1' : it.off ? '#53616a' : it.kind === 'cat' ? hex(COLORS.coast) : '#dce5e5');
     t.setPosition(it.x, it.y);
     setT(t, it.label);
   });
 
-  if (play && (s.phase === 'choose' || s.phase === 'aim' || s.phase === 'clash' || s.phase === 'throw')) {
+  // Cohesive lower phase rail and time pressure meter.
+  if (play && phase) {
+    g.fillStyle(0x03080e, 0.9);
+    g.fillPoints([{ x: 0, y: 530 }, { x: 145, y: 530 }, { x: 165, y: 538 }, { x: 635, y: 538 }, { x: 655, y: 530 }, { x: W, y: 530 }, { x: W, y: H }, { x: 0, y: H }], true);
+    g.lineStyle(2, s.phase === 'clash' ? COLORS.cpu : COLORS.p1, 0.75);
+    g.lineBetween(145, 530, 655, 530);
+  }
+  if (play && ['choose', 'aim', 'clash', 'throw'].includes(s.phase)) {
     const total = s.phase === 'clash' || s.phase === 'throw' ? CLASH_MS : TURN_MS;
     const left = Math.max(0, s.deadline - time) / total;
-    const barW = 300;
+    const barW = 430;
     const barX = W / 2 - barW / 2;
-    const barY = H - 16;
-    // Border.
-    g.lineStyle(1.5, COLORS.white, 0.6);
-    g.strokeRect(barX - 1, barY - 1, barW + 2, 6);
-    // Fill: green→yellow→red as time runs out.
     const barColor = left > 0.5 ? COLORS.p1 : left > 0.25 ? COLORS.bolt : COLORS.cpu;
-    g.fillStyle(barColor, 0.9);
-    g.fillRect(barX, barY, barW * left, 4);
+    g.fillStyle(0x17232c, 1);
+    g.fillRect(barX, H - 11, barW, 5);
+    g.fillStyle(barColor, 1);
+    g.fillRect(barX, H - 11, barW * left, 5);
   }
 
-  // Overlays: attract title + how-to-play cards, or game over.
+  // Attract/game-over title treatment: one decisive plate, no generic modal stack.
   let title = '';
   let sub = '';
   let titleColor = COLORS.p1;
@@ -1869,11 +2326,13 @@ function drawHud(s, time) {
     sub = time > s.phaseStart + ATTRACT_OVER_MS && blinkOn ? 'PRESS START' : ' ';
   }
   if (title) {
-    drawLabelSlab(g, W / 2 - 210, 116, 420, 46, titleColor, true);
+    drawLabelSlab(g, W / 2 - 222, 112, 444, 52, titleColor, true);
     const lines = sub.split('\n').length;
-    g.fillStyle(0x000000, 0.8);
-    g.fillRect(W / 2 - 200, 172, 400, lines * 16 + 12);
-    ui.sub.setY(178 + (lines * 16) / 2);
+    g.fillStyle(0x03070d, 0.88);
+    g.fillPoints([{ x: 215, y: 174 }, { x: 585, y: 174 }, { x: 568, y: 186 + lines * 16 }, { x: 232, y: 186 + lines * 16 }], true);
+    g.lineStyle(2, titleColor, 0.55);
+    g.lineBetween(250, 174, 550, 174);
+    ui.sub.setY(180 + (lines * 16) / 2);
   }
   setT(ui.title, title);
   setT(ui.sub, title ? sub : '');
