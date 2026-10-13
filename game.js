@@ -56,7 +56,9 @@ const LUNGE_DASH = 2;
 const GRAB_DMG = 10;
 const THROW_DMG = 15;
 const SLAM_DMG = 10; // extra when the throw hits land / the edge
-const THROW_DIST = 2;
+const THROW_DIST = 6; // flying knockback
+const CRASH_DMG = 15; // thrown into a palafito or the bridge: it breaks
+const OIL_DMG = 10; // thrown over oil: it explodes and is consumed
 const GUTS_MAX = 80; // melee damage fills it; a full meter refreshes the BURST charge
 const GUTS_BONUS = 10; // parry, throw and oil
 const BURST_DMG = 15;
@@ -71,6 +73,7 @@ const CLASH_WINDOW = 0; // only strikes of equal speed clash
 // Zone events (P8).
 const ZONE_CHANCE = { cat: 0.35, verdin: 0.4 }; // probability per turn
 const ZONE_VERDIN_DMG = 8; // slip damage
+const ZONE_CAT_DMG = 12; // Catatumbo lightning
 
 // Stance ladder: NORMAL→STAGGERED→KNOCKBACK→DOWN
 const ST_NORMAL = 0;
@@ -106,6 +109,10 @@ for (const [t, ...p] of [
   [6, 4, 6, 9, 8, 16, 11, 8, 18],
   [7, 4, 13, 13, 10, 10, 16, 14, 19],
 ]) for (let i = 0; i < p.length; i += 2) LAGO_MAP[p[i + 1]][p[i]] = t;
+// Pristine copy: thrown mechas break tiles, every match starts from this.
+const MAP0 = LAGO_MAP.map((r) => [...r]);
+const BRIDGE_ROW = MAP0.findIndex((r) => r.includes(2));
+const BRIDGE_XS = MAP0[BRIDGE_ROW].flatMap((t, x) => (t === 2 ? [x] : []));
 const ROWS = LAGO_MAP.length;
 const COLS = LAGO_MAP[0].length;
 
@@ -236,6 +243,7 @@ function newUnit(start) {
 }
 
 function newState() {
+  MAP0.forEach((r, y) => (LAGO_MAP[y] = [...r]));
   return { units: [newUnit(P1_START), newUnit(CPU_START)], turn: 1, over: null };
 }
 
@@ -378,9 +386,9 @@ function resolveZone(s, i, events, rnd = Math.random) {
   const tag = zone.toUpperCase();
   const color = ZONE_COLOR[zone];
   if (zone === 'cat' && rnd() < ZONE_CHANCE.cat) {
-    u.hp = Math.max(0, u.hp - Math.round(SLASH_DMG * 0.5));
+    u.hp = Math.max(0, u.hp - ZONE_CAT_DMG);
     advanceStance(u);
-    events.push({ t: 'zone', who: i, zone: tag, dmg: Math.round(SLASH_DMG * 0.5), st: u.st, color });
+    events.push({ t: 'zone', who: i, zone: tag, dmg: ZONE_CAT_DMG, st: u.st, color });
     return;
   }
   if (zone === 'verdin' && rnd() < ZONE_CHANCE.verdin) {
@@ -682,29 +690,71 @@ function resolveTurn(state, plans) {
   return { state: s, events, clash: false, grab };
 }
 
-// Grabber `who` throws the foe up to 2 tiles in `dir`; slamming into land/the edge hurts more.
+// Pure flight of a thrown unit (index fw) in `dir`, tile by tile. Palafitos and the bridge stop
+// it and break; Catatumbo strikes, oil explodes (and is consumed), verdín slides it one tile further;
+// the board edge or the thrower is a hard slam. Returns path, total damage, events and broken tiles.
+function flightOf(foe, dir, me, fw) {
+  const path = [];
+  const events = [];
+  const breaks = [];
+  let c = foe;
+  let left = THROW_DIST;
+  let dmg = THROW_DMG;
+  let slam = false;
+  while (left-- > 0) {
+    const t = step(c, dir);
+    const k = tileAt(t.x, t.y);
+    if (k === 5 || same(t, me)) {
+      slam = true;
+      break;
+    }
+    path.push(t);
+    events.push({ t: 'knock', who: fw, path: [t], fly: true });
+    c = t;
+    if (k === 2 || k === 3) {
+      dmg += CRASH_DMG;
+      breaks.push(t);
+      events.push({ t: 'break', who: fw, x: t.x, y: t.y, k, dmg: CRASH_DMG });
+      break;
+    }
+    if (k === 4) {
+      dmg += ZONE_CAT_DMG;
+      events.push({ t: 'zone', who: fw, zone: 'CAT', dmg: ZONE_CAT_DMG, color: ZONE_COLOR.cat });
+    } else if (k === 7) {
+      dmg += OIL_DMG;
+      breaks.push(t);
+      events.push({ t: 'zone', who: fw, zone: 'OIL BLAST', dmg: OIL_DMG, color: ZONE_COLOR.oil }, { t: 'break', who: fw, x: t.x, y: t.y, k });
+    } else if (k === 6) {
+      left++;
+      events.push({ t: 'zone', who: fw, zone: 'VERDIN', push: true, color: ZONE_COLOR.verdin });
+    }
+  }
+  if (slam) dmg += SLAM_DMG;
+  return { path, events, breaks, dmg, slam };
+}
+
+// Grabber `who` throws the foe in `dir`. Broken tiles turn into open water for the rest of the match.
 function resolveThrow(state, who, dir) {
   const s = cloneState(state);
   const me = s.units[who];
   const foe = s.units[1 - who];
-  const path = dashPath(foe, dir, THROW_DIST, me);
-  const slam = path.length < THROW_DIST;
-  const dmg = THROW_DMG + (slam ? SLAM_DMG : 0);
-  if (path.length) {
-    const last = path[path.length - 1];
-    foe.x = last.x;
-    foe.y = last.y;
-  }
-  foe.hp = Math.max(0, foe.hp - dmg);
+  const f = flightOf(foe, dir, me, 1 - who);
+  f.breaks.forEach((b) => (LAGO_MAP[b.y][b.x] = 0));
+  const last = f.path[f.path.length - 1] || foe;
+  foe.x = last.x;
+  foe.y = last.y;
+  foe.hp = Math.max(0, foe.hp - f.dmg);
   const prevSt = foe.st;
   foe.st = ST_DOWN;
+  // Zone and break events carry their own damage; the final hit carries the rest.
+  const extra = f.events.reduce((n, e) => n + (e.dmg || 0), 0);
   const events = [
     { t: 'throw', who, dir },
-    { t: 'knock', who: 1 - who, path },
+    ...f.events,
     { t: 'stance', who: 1 - who, st: ST_DOWN },
-    { t: 'hit', who: 1 - who, dmg, slam, prevSt },
+    { t: 'hit', who: 1 - who, dmg: f.dmg - extra, slam: f.slam, prevSt },
   ];
-  gainGuts(me, GUTS_BONUS + dmg, events, who);
+  gainGuts(me, GUTS_BONUS, events, who);
   finishTurn(s);
   return { state: s, events };
 }
@@ -840,13 +890,14 @@ function cpuPlan(s, i, rnd = Math.random) {
   return { act: 'move', path: scored[pickIndex].path };
 }
 
-// Throw toward land if it slams, otherwise any open direction.
+// Throw where the flight hurts most (crashes, lightning, oil), random among ties.
 function cpuThrowDir(s, i, rnd = Math.random) {
   const foe = s.units[1 - i];
   const me = s.units[i];
-  const slams = DIR_KEYS.filter((k) => dashPath(foe, k, THROW_DIST, me).length < THROW_DIST && !same(step(foe, k), me));
   const open = DIR_KEYS.filter((k) => !same(step(foe, k), me));
-  const pool = slams.length ? slams : open;
+  const dmg = (k) => flightOf(foe, k, me, 1 - i).dmg;
+  const best = Math.max(...open.map(dmg));
+  const pool = open.filter((k) => dmg(k) === best);
   return pool[Math.floor(rnd() * pool.length)];
 }
 
@@ -1040,33 +1091,36 @@ function drawHut(g, cx, cy) {
 
 // Solid cable-stayed Puente General Rafael Urdaneta across the northern strait.
 function drawBridge(g) {
-  const row = LAGO_MAP.findIndex((r) => r.includes(2));
-  if (row < 0) return;
-  const xs = [];
-  LAGO_MAP[row].forEach((t, x) => t === 2 && xs.push(x));
-  const a = toIso(xs[0] - 1, row);
-  const b = toIso(xs[xs.length - 1] + 1, row);
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const n = Math.hypot(dx, dy);
-  const nx = (-dy / n) * 7;
-  const ny = (dx / n) * 7;
-  const deck = [
-    { x: a.x + nx, y: a.y + ny - DECK_H }, { x: b.x + nx, y: b.y + ny - DECK_H },
-    { x: b.x - nx, y: b.y - ny - DECK_H }, { x: a.x - nx, y: a.y - ny - DECK_H },
-  ];
-  g.fillStyle(0x02070b, 0.5);
-  g.fillPoints(deck.map((p) => ({ x: p.x + 8, y: p.y + 11 })), true);
-  g.fillStyle(0x46545b, 1);
-  g.fillPoints([deck[1], deck[2], { x: deck[2].x, y: deck[2].y + 7 }, { x: deck[1].x, y: deck[1].y + 7 }], true);
-  g.fillStyle(C_concrete, 1);
-  g.fillPoints(deck, true);
-  g.lineStyle(2, C_ink, 1);
-  g.strokePoints(deck, true);
-  g.lineStyle(1, 0xf2e7c5, 0.85);
-  g.lineBetween(a.x, a.y - DECK_H, b.x, b.y - DECK_H);
+  const row = BRIDGE_ROW;
+  const xs = BRIDGE_XS;
+  const o = toIso(0, row);
+  const e = toIso(1, row);
+  const n = Math.hypot(e.x - o.x, e.y - o.y);
+  const nx = (-(e.y - o.y) / n) * 7;
+  const ny = ((e.x - o.x) / n) * 7;
+  // One deck slab per intact tile; the end slabs reach the shore.
+  for (const x of xs) {
+    if (tileAt(x, row) !== 2) continue;
+    const a = toIso(x - (x === xs[0] ? 1 : 0.5), row);
+    const b = toIso(x + (x === xs[xs.length - 1] ? 1 : 0.5), row);
+    const deck = [
+      { x: a.x + nx, y: a.y + ny - DECK_H }, { x: b.x + nx, y: b.y + ny - DECK_H },
+      { x: b.x - nx, y: b.y - ny - DECK_H }, { x: a.x - nx, y: a.y - ny - DECK_H },
+    ];
+    g.fillStyle(0x02070b, 0.5);
+    g.fillPoints(deck.map((p) => ({ x: p.x + 8, y: p.y + 11 })), true);
+    g.fillStyle(0x46545b, 1);
+    g.fillPoints([deck[1], deck[2], { x: deck[2].x, y: deck[2].y + 7 }, { x: deck[1].x, y: deck[1].y + 7 }], true);
+    g.fillStyle(C_concrete, 1);
+    g.fillPoints(deck, true);
+    g.lineStyle(2, C_ink, 1);
+    g.strokePoints(deck, true);
+    g.lineStyle(1, 0xf2e7c5, 0.85);
+    g.lineBetween(a.x, a.y - DECK_H, b.x, b.y - DECK_H);
+  }
 
   for (const x of xs) {
+    if (tileAt(x, row) !== 2) continue;
     const t = toIso(x, row);
     g.fillStyle(0x26363d, 0.7);
     g.fillPoints([{ x: t.x - 5, y: t.y + 2 }, { x: t.x + 2, y: t.y - 1 }, { x: t.x + 4, y: t.y + 21 }, { x: t.x - 3, y: t.y + 23 }], true);
@@ -1074,6 +1128,7 @@ function drawBridge(g) {
     g.strokePoints([{ x: t.x - 5, y: t.y + 2 }, { x: t.x + 2, y: t.y - 1 }, { x: t.x + 4, y: t.y + 21 }, { x: t.x - 3, y: t.y + 23 }], true);
   }
   for (const x of [xs[0], xs[xs.length - 1]]) {
+    if (tileAt(x, row) !== 2) continue;
     const t = toIso(x, row);
     const deckY = t.y - DECK_H;
     const topY = deckY - TOWER_H;
@@ -1633,6 +1688,8 @@ function resetMatch(s, mode) {
   s.token++;
   s.mode = mode;
   s.state = newState();
+  s.gMap.clear();
+  drawMap(s.gMap);
   s.view = s.state.units.map((u) => ({ gx: u.x, gy: u.y, facing: u.facing, st: 0, flash: 0, pose: 'idle', frame: 0 }));
   s.dispHp = [HP_MAX, HP_MAX];
   s.fx = [];
@@ -1811,6 +1868,7 @@ function handleInput(s, time) {
 
 async function lockTurn(s) {
   const token = s.token;
+  let thrown = -1;
   s.phase = 'resolve';
   const r = resolveTurn(s.state, [s.p1Plan, s.cpuPlanned]);
   if (!(await playEvents(s, r.events, token))) return;
@@ -1820,6 +1878,8 @@ async function lockTurn(s) {
     const dir = await askThrow(s, r.grab);
     if (token !== s.token) return;
     const t = resolveThrow(s.state, r.grab, dir);
+    thrown = 1 - r.grab;
+    t.events.forEach((e) => e.t === 'break' && (LAGO_MAP[e.y][e.x] = MAP0[e.y][e.x]));
     if (!(await playEvents(s, t.events, token))) return;
     s.state = t.state;
   }
@@ -1836,9 +1896,9 @@ async function lockTurn(s) {
 
   // Zone events: check both final tiles, then adjudicate without advancing twice.
   if (!s.state.over) {
+    // A thrown unit already triggered every zone it flew over.
     const zEvents = [];
-    resolveZone(s.state, 0, zEvents);
-    resolveZone(s.state, 1, zEvents);
+    [0, 1].forEach((i) => i !== thrown && resolveZone(s.state, i, zEvents));
     checkOutcome(s.state);
     if (zEvents.length && !(await playEvents(s, zEvents, token))) return;
   }
@@ -2031,7 +2091,21 @@ async function playEvents(s, events, token) {
       floatText(s, u, ACTIONS[e.act].name + ' LOST', C_bolt, 13, 1300);
       await wait(s, 450);
     } else if (e.t === 'knock') {
-      for (const c of e.path) await tweenTo(s, u, c.x, c.y, STEP_MS * 0.7);
+      for (const c of e.path) await tweenTo(s, u, c.x, c.y, STEP_MS * (e.fly ? 0.45 : 0.7));
+    } else if (e.t === 'break') {
+      LAGO_MAP[e.y][e.x] = 0;
+      s.gMap.clear();
+      drawMap(s.gMap);
+      const p = toIso(e.x, e.y);
+      addFx(s, { kind: 'shards', x: p.x, y: p.y - 12, color: e.k === 3 ? C_rust : C_concrete, dur: 520 });
+      if (e.dmg) {
+        s.dispHp[e.who] = Math.max(0, s.dispHp[e.who] - e.dmg);
+        u.flash = 1;
+        floatText(s, u, (e.k === 2 ? 'BRIDGE DOWN! -' : 'PALAFITO WRECKED! -') + e.dmg, C_white, 16, 1300);
+        shake(240, 0.014);
+        s.sfx.clash();
+        await wait(s, 500);
+      }
     } else if (e.t === 'caught') {
       floatText(s, u, 'CAUGHT!', C_bolt, 17);
       s.sfx.hit();
@@ -2171,8 +2245,8 @@ function drawWorld(s, time, delta) {
       const p = toIso(n.x, n.y);
       drawArrow(g, p.x, p.y, stick, dir === s.throwDir ? C_white : 0x5a6070);
     }
-    const path = dashPath(foe, s.throwDir, THROW_DIST, me);
-    path.forEach((c) => drawCell(g, c.x, c.y, C_bolt, 0.15 + 0.15 * blink, 0.8));
+    const f = flightOf(foe, s.throwDir, me, 1);
+    f.path.forEach((c, k) => drawCell(g, c.x, c.y, k === f.path.length - 1 && f.breaks.length ? C_cpu : C_bolt, 0.15 + 0.15 * blink, 0.8));
   }
 
   const gu = s.gUnits;
@@ -2297,7 +2371,7 @@ function drawHud(s, time) {
     hint = 'PARRY > THRUST > FEINT > PARRY   BURST BEATS THRUST + FEINT';
   } else if (play && s.phase === 'throw') {
     phase = 'TARGET CAPTURED // THROW';
-    hint = 'STICK AIM   B1 THROW   IMPACT LAND FOR +10';
+    hint = 'STICK AIM   B1 THROW   SMASH HUTS, THE BRIDGE OR THE EDGE';
   } else if (s.phase === 'resolve') phase = s.banner;
   setT(ui.phase, play ? phase : '');
   setT(ui.hint, hint);
