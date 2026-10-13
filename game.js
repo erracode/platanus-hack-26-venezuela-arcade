@@ -219,6 +219,7 @@ function consumePressed(controls, code) {
 const ACTIONS = {
   move: { name: 'MOVE', spd: 160, target: 'tile', range: 3, info: ['FORWARD 3 // SIDE 2 // BACK 1', 'FURTHER = SLOWER  FWD 3 = MOMENTUM'] },
   dodge: { name: 'DODGE', spd: 215, target: 'tile', range: 1, info: ['HOP 1 TILE, KEEP FACING', 'VERY FAST: ESCAPE AN ATTACK'] },
+  tele: { name: 'TELEPORT', spd: 215, target: 'tile', range: 3, info: ['BLINK UP TO 3 TILES, ANY ANGLE', '1 CHARGE  INTO AN ATTACK = LAUNCHED'] },
   pivot: { name: 'PIVOT', spd: 215, target: 'dir', info: ['TURN TO FACE ANOTHER SIDE', 'TURNING INSIDE AN ATTACK COSTS 60/90°'] },
   vslash: { name: 'V-SLASH', spd: 150, target: 'dir', strike: true, info: ['3 TILES FORWARD: 22 DMG', 'X2 ON FLANK'] },
   hslash: { name: 'H-SLASH', spd: 150, target: 'dir', strike: true, info: ['WIDE SWEEP 3X2: 22 DMG', 'X2 ON FLANK  REACHES DIAGONALS'] },
@@ -229,7 +230,7 @@ const ACTIONS = {
   burst: { name: 'BURST', spd: 210, target: 'none', info: ['ESCAPE KNOCKBACK: PUSH + OVERDRIVE', '1 CHARGE // REFILLS ON FULL GUTS'] },
   wait: { name: 'WAIT', spd: 0, target: 'none', info: [] },
 };
-const MOVE_ACTS = ['move', 'dodge', 'pivot'];
+const MOVE_ACTS = ['move', 'dodge', 'tele', 'pivot'];
 const COMBAT_ACTS = ['vslash', 'hslash', 'jab', 'lunge', 'parry', 'grab'];
 const STRIKE_ACTS = ['vslash', 'hslash', 'jab', 'lunge'];
 const WAIT_PLAN = { act: 'wait' };
@@ -239,7 +240,7 @@ const CLASH_WINS = { parry: ['thrust', 'burst'], thrust: ['feint'], feint: ['par
 
 function newUnit(start) {
   // open: whiffed a parry/grab and must skip the next turn.
-  return { x: start.x, y: start.y, facing: start.facing, hp: HP_MAX, guts: 0, bursts: 1, od: 0, momentum: false, st: ST_NORMAL, open: false };
+  return { x: start.x, y: start.y, facing: start.facing, hp: HP_MAX, guts: 0, bursts: 1, tp: 1, od: 0, momentum: false, st: ST_NORMAL, open: false };
 }
 
 function newState() {
@@ -286,6 +287,7 @@ function dirBetween(a, b) {
 
 function canUse(u, act) {
   if (act === 'lunge') return u.momentum || u.od > 0;
+  if (act === 'tele') return u.tp > 0;
   if (act === 'burst') return u.st === ST_KNOCKBACK && u.bursts > 0;
   return true;
 }
@@ -324,6 +326,27 @@ function reach(s, i, range) {
   return out;
 }
 
+// TELEPORT targets: any free walkable tile within 3 steps, at any angle.
+function tpReach(s, i) {
+  const me = s.units[i];
+  const out = new Map();
+  for (let dy = -3; dy <= 3; dy++) {
+    for (let dx = -3; dx <= 3; dx++) {
+      const t = { x: me.x + dx, y: me.y + dy };
+      const d = dist(t, me);
+      if (d && d <= 3 && isWalkable(t.x, t.y) && !same(t, s.units[1 - i])) out.set(t.x + ',' + t.y, [t]);
+    }
+  }
+  return out;
+}
+
+// Dominant grid direction from a toward b.
+function faceTo(a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  return Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 'E' : 'W') : dy > 0 ? 'S' : 'N';
+}
+
 // Straight dash of up to n tiles, stopping before land or the other unit.
 function dashPath(from, dir, n, other) {
   const path = [];
@@ -343,7 +366,7 @@ function previewPlan(u, plan, other) {
   if (a.target === 'tile' && plan.path && plan.path.length) {
     const last = plan.path[plan.path.length - 1];
     const prev = plan.path.length > 1 ? plan.path[plan.path.length - 2] : u;
-    return { x: last.x, y: last.y, facing: plan.act === 'dodge' ? u.facing : dirBetween(prev, last) };
+    return { x: last.x, y: last.y, facing: plan.act === 'dodge' ? u.facing : plan.act === 'tele' ? faceTo(last, u) : dirBetween(prev, last) };
   }
   if (plan.act === 'lunge') {
     const path = dashPath(u, plan.dir, LUNGE_DASH, other);
@@ -358,7 +381,7 @@ function gainGuts(u, n, events, who) {
   u.guts = Math.min(GUTS_MAX, u.guts + n);
   if (u.guts < GUTS_MAX || u.bursts) return;
   u.guts = 0;
-  u.bursts = 1;
+  u.bursts = u.tp = 1;
   events.push({ t: 'refresh', who });
 }
 
@@ -504,6 +527,8 @@ function resolveTurn(state, plans) {
   let grab = null;
 
   const parried = [false, false];
+  const blinked = [false, false]; // teleported this turn: an incoming strike launches it
+  let launched = -1;
   const inv = [false, false]; // bursting units cannot be hit this step
   const hurt = [false, false];
   const strike = (i, dmg, flankMult, combo = true) => {
@@ -518,6 +543,21 @@ function resolveTurn(state, plans) {
     if (prevSt !== foe.st) events.push({ t: 'stance', who: 1 - i, st: foe.st });
     events.push({ t: 'hit', who: 1 - i, dmg: total, flank: flank && flankMult > 1, relation, prevSt, combo });
     gainGuts(U[i], total, events, i);
+    if (blinked[1 - i] && p[i].act !== 'grab') {
+      // Teleported into an attack: launched along the attacker's facing like a throw (a grab just catches).
+      blinked[1 - i] = false;
+      launched = 1 - i;
+      const f = flightOf(foe, U[i].facing, U[i], 1 - i);
+      f.breaks.forEach((b) => (LAGO_MAP[b.y][b.x] = 0));
+      const last = f.path[f.path.length - 1] || foe;
+      foe.x = last.x;
+      foe.y = last.y;
+      foe.hp = Math.max(0, foe.hp - (f.dmg - THROW_DMG));
+      foe.st = ST_DOWN;
+      events.push({ t: 'launch', who: 1 - i }, ...f.events);
+      events.push({ t: 'stance', who: 1 - i, st: ST_DOWN });
+      if (f.slam) events.push({ t: 'hit', who: 1 - i, dmg: SLAM_DMG, slam: true, combo: false });
+    }
     if (!done[1 - i] && !groups.find((g) => g.includes(i)).includes(1 - i) && p[1 - i].act !== 'wait' && !cancelled[1 - i]) {
       cancelled[1 - i] = true;
       events.push({ t: 'interrupt', who: 1 - i, act: p[1 - i].act });
@@ -541,6 +581,12 @@ function resolveTurn(state, plans) {
     for (const i of acting) {
       const a = p[i].act;
       if (a === 'lunge') walk[i] = dashPath(U[i], p[i].dir, LUNGE_DASH, U[1 - i]);
+      if (a === 'tele') {
+        const t = (p[i].path || [])[0];
+        U[i].tp = 0;
+        walk[i] = t && dist(t, U[i]) <= 3 && isWalkable(t.x, t.y) && !same(t, U[1 - i]) ? [t] : [];
+        continue;
+      }
       if (ACTIONS[a].target !== 'tile') continue;
       const path = [], cells = p[i].path || [], dir = dirBetween(U[i], cells[0]);
       const max = a === 'move' ? (dir === start[i].facing ? 3 : dir === OPPOSITE[start[i].facing] ? 1 : 2) : 1;
@@ -565,7 +611,10 @@ function resolveTurn(state, plans) {
         continue;
       }
       const last = path[path.length - 1];
-      if (p[i].act !== 'dodge') U[i].facing = dirBetween(U[i], path[0]);
+      if (p[i].act === 'tele') {
+        U[i].facing = faceTo(last, U[i]);
+        blinked[i] = true;
+      } else if (p[i].act !== 'dodge') U[i].facing = dirBetween(U[i], path[0]);
       U[i].x = last.x;
       U[i].y = last.y;
       if (p[i].act === 'move' && path.length === 3) {
@@ -632,7 +681,7 @@ function resolveTurn(state, plans) {
       else {
         strike(i, LUNGE_DMG, LUNGE_FLANK);
         const to = step(foe, u.facing);
-        if (isWalkable(to.x, to.y) && !same(to, u)) {
+        if (launched !== 1 - i && isWalkable(to.x, to.y) && !same(to, u)) {
           foe.x = to.x;
           foe.y = to.y;
           events.push({ t: 'knock', who: 1 - i, path: [to] });
@@ -687,7 +736,7 @@ function resolveTurn(state, plans) {
     if (momentum[i]) events.push({ t: 'momentum', who: i });
   });
   if (grab === null) finishTurn(s);
-  return { state: s, events, clash: false, grab };
+  return { state: s, events, clash: false, grab, launched };
 }
 
 // Pure flight of a thrown unit (index fw) in `dir`, tile by tile. Palafitos and the bridge stop
@@ -830,6 +879,12 @@ function cpuPlan(s, i, rnd = Math.random) {
     const o = outs();
     if (o.length && r < 0.55) return { act: 'dodge', path: pick(o) };
     if (toFoe) return { act: r < 0.8 ? 'parry' : 'jab', dir: toFoe };
+  }
+
+  // Blink behind a foe that is squaring up, to flank it next turn.
+  if (canUse(me, 'tele') && same(frontOf(foe), me) && rnd() < 0.2) {
+    const back = step(foe, OPPOSITE[foe.facing]);
+    if (tpReach(s, i).has(back.x + ',' + back.y)) return { act: 'tele', path: [back] };
   }
 
   // Chain the combo: if the foe is staggered/knocked/down/open and in vslash range, press it.
@@ -1749,7 +1804,7 @@ function startAim(s) {
   s.sel.dir = me.facing;
   s.sel.cur = null;
   if (a.target === 'tile') {
-    s.sel.valid = reach(s.state, 0, a.range);
+    s.sel.valid = s.sel.act === 'tele' ? tpReach(s.state, 0) : reach(s.state, 0, a.range);
     const foe = s.state.units[1];
     let best = null;
     for (const path of s.sel.valid.values()) {
@@ -1873,13 +1928,13 @@ async function lockTurn(s) {
   const r = resolveTurn(s.state, [s.p1Plan, s.cpuPlanned]);
   if (!(await playEvents(s, r.events, token))) return;
   s.state = r.state;
+  if (r.launched >= 0) thrown = r.launched;
 
   if (r.grab !== null && r.grab !== undefined && !s.state.over) {
     const dir = await askThrow(s, r.grab);
     if (token !== s.token) return;
     const t = resolveThrow(s.state, r.grab, dir);
     thrown = 1 - r.grab;
-    t.events.forEach((e) => e.t === 'break' && (LAGO_MAP[e.y][e.x] = MAP0[e.y][e.x]));
     if (!(await playEvents(s, t.events, token))) return;
     s.state = t.state;
   }
@@ -2005,6 +2060,8 @@ const actLabel = (i) => (i ? 'CPU ' : 'P1 ');
 // Play one resolution step by step so the order of actions reads clearly.
 async function playEvents(s, events, token) {
   const v = s.view;
+  // Broken tiles reappear until their impact plays (the rules already applied them).
+  events.forEach((e) => e.t === 'break' && (LAGO_MAP[e.y][e.x] = MAP0[e.y][e.x]));
   const shake = (ms, k) => s.cameras.main.shake(ms, k);
   for (let ei = 0; ei < events.length; ei++) {
     const e = events[ei];
@@ -2029,6 +2086,13 @@ async function playEvents(s, events, token) {
       batch.forEach(() => s.sfx.move());
       await Promise.all(batch.map(async (m) => {
         const mover = v[m.who], thrust = m.act === 'move' || m.act === 'lunge';
+        if (m.act === 'tele') {
+          const from = toIso(mover.gx, mover.gy);
+          addFx(s, { kind: 'shards', x: from.x, y: from.y - 30, color: unitColor(m.who), dur: 300 });
+          Object.assign(mover, { gx: m.path[0].x, gy: m.path[0].y, facing: m.facing, flash: 1 });
+          s.sfx.parry();
+          return wait(s, 250);
+        }
         const steps = m.path.length * 3;
         let n = 0;
         if (thrust) { mover.pose = 'move'; mover.facing = m.facing; }
@@ -2113,8 +2177,12 @@ async function playEvents(s, events, token) {
     } else if (e.t === 'throw') {
       floatText(s, u, 'THROW!', unitColor(e.who), 17);
       await wait(s, 200);
+    } else if (e.t === 'launch') {
+      floatText(s, u, 'LAUNCHED!', C_bolt, 17);
+      shake(160, 0.01);
+      await wait(s, 250);
     } else if (e.t === 'refresh') {
-      floatText(s, u, 'GUTS FULL! BURST READY', C_bolt, 14, 1300);
+      floatText(s, u, 'GUTS FULL! CHARGES READY', C_bolt, 14, 1300);
       s.sfx.lock();
       await wait(s, 300);
     } else if (e.t === 'open') {
