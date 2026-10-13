@@ -48,6 +48,9 @@ const OPPOSITE = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
 // Combat tuning (ROADMAP.md §3–§4).
 const HP_MAX = 160;
+const STAGE_HP = 20; // each gauntlet stage gives the CPU more max HP
+const STAGE_HEAL = 40; // P1 carries HP between stages and heals this much
+const TOP_KEY = 'catatumbo/top5';
 const SLASH_DMG = 22; // ~7 clean frontal hits to KO
 const LUNGE_DMG = 18;
 const JAB_DMG = 8; // quick poke: never advances stance
@@ -238,14 +241,15 @@ const WAIT_PLAN = { act: 'wait' };
 const CLASH_PICKS = ['thrust', 'parry', 'feint', 'burst'];
 const CLASH_WINS = { parry: ['thrust', 'burst'], thrust: ['feint'], feint: ['parry'], burst: ['thrust', 'feint'] };
 
-function newUnit(start) {
+function newUnit(start, hp, mx) {
   // open: whiffed a parry/grab and must skip the next turn.
-  return { x: start.x, y: start.y, facing: start.facing, hp: HP_MAX, guts: 0, bursts: 1, tp: 1, od: 0, momentum: false, st: ST_NORMAL, open: false };
+  return { x: start.x, y: start.y, facing: start.facing, hp, mx, guts: 0, bursts: 1, tp: 1, od: 0, momentum: false, st: ST_NORMAL, open: false };
 }
 
-function newState() {
+function newState(stage = 1, hp = HP_MAX) {
   MAP0.forEach((r, y) => (LAGO_MAP[y] = [...r]));
-  return { units: [newUnit(P1_START), newUnit(CPU_START)], turn: 1, over: null };
+  const mx = HP_MAX + STAGE_HP * (stage - 1);
+  return { units: [newUnit(P1_START, hp, HP_MAX), newUnit(CPU_START, mx, mx)], turn: 1, over: null };
 }
 
 function cloneState(s) {
@@ -1689,6 +1693,15 @@ function create() {
   this.sfx = createAudio(this);
   this.token = 0;
   this.attractStart = 0;
+  this.top = [];
+  // Storage persists across releases and may be missing or slow: validate entries, merge with
+  // anything saved meanwhile, and never let it break the scene.
+  try {
+    Promise.resolve(window.platanusArcadeStorage.get(TOP_KEY)).then((r) => {
+      const ok = r && r.found && Array.isArray(r.value) ? r.value.filter((e) => e && /^[A-Z]{3}$/.test(e.n) && Number.isFinite(e.s) && e.s >= 0) : [];
+      this.top = [...this.top, ...ok].sort((a, b) => b.s - a.s).slice(0, 5);
+    }).catch(() => {});
+  } catch (e) {}
   resetMatch(this, 'attract');
 }
 
@@ -1742,15 +1755,21 @@ function clearAsync(s) {
   s.floaters = [];
 }
 
-function resetMatch(s, mode) {
+// next = continue the gauntlet: same run, next stage, P1 keeps (and heals) its HP.
+function resetMatch(s, mode, next) {
   clearAsync(s);
   s.token++;
   s.mode = mode;
-  s.state = newState();
+  const hp = next ? Math.min(HP_MAX, s.state.units[0].hp + STAGE_HEAL) : HP_MAX;
+  if (!next) {
+    s.stage = 1;
+    s.score = 0;
+  }
+  s.state = newState(s.stage, hp);
   s.gMap.clear();
   drawMap(s.gMap);
   s.view = s.state.units.map((u) => ({ gx: u.x, gy: u.y, facing: u.facing, st: 0, flash: 0, pose: 'idle', frame: 0 }));
-  s.dispHp = [HP_MAX, HP_MAX];
+  s.dispHp = s.state.units.map((u) => u.hp);
   s.fx = [];
   s.lastP1Pick = null;
   s.clashResolve = null;
@@ -1770,7 +1789,10 @@ function beginTurn(s) {
   if (s.state.over) {
     s.phase = 'over';
     s.deadline = now + (s.mode === 'play' ? OVER_IDLE_MS : ATTRACT_OVER_MS);
-    if (s.state.over === 'p1') s.sfx.win();
+    const [a, b] = s.state.units;
+    const won = s.state.over === 'p1';
+    if (s.mode === 'play') s.score += (b.mx - b.hp) * 10 + (won ? 1000 * s.stage + a.hp * 10 : 0);
+    if (won) s.sfx.win();
     else s.sfx.lose();
     return;
   }
@@ -1843,9 +1865,17 @@ function handleInput(s, time) {
     return;
   }
   if (s.phase === 'over') {
-    if (time < s.phaseStart + ATTRACT_OVER_MS) clearPressed(c);
-    else if (start()) resetMatch(s, 'play');
-    else if (time > s.deadline) resetMatch(s, 'attract');
+    if (time < s.phaseStart + ATTRACT_OVER_MS) return clearPressed(c);
+    if (!start() && time < s.deadline) return;
+    if (s.state.over !== 'p1') return endRun(s);
+    s.stage++;
+    return resetMatch(s, 'play', true);
+  }
+  if (s.phase === 'name') {
+    const k = s.ini;
+    if (consumePressed(c, 'P1_U')) k[s.iniPos] = (k[s.iniPos] + 1) % 26;
+    if (consumePressed(c, 'P1_D')) k[s.iniPos] = (k[s.iniPos] + 25) % 26;
+    if ((consumePressed(c, 'P1_1') && ++s.iniPos > 2) || time > s.deadline) saveScore(s);
     return;
   }
   if (s.phase === 'clash') {
@@ -1923,6 +1953,27 @@ function handleInput(s, time) {
     if (plan) lockP1(s, plan);
     else s.sfx.tick();
   }
+}
+
+// Run over: enter initials if the score makes the top 5, otherwise back to attract.
+function endRun(s) {
+  if (s.score > 0 && (s.top.length < 5 || s.score > s.top[4].s)) {
+    s.phase = 'name';
+    s.ini = [0, 0, 0];
+    s.iniPos = 0;
+    s.deadline = s.time.now + OVER_IDLE_MS; // an abandoned cabinet still saves and returns to attract
+    clearPressed(s.controls);
+  } else resetMatch(s, 'attract');
+}
+
+const initials = (k) => k.map((n) => String.fromCharCode(65 + n)).join('');
+
+function saveScore(s) {
+  s.top = [...s.top, { n: initials(s.ini), s: s.score }].sort((a, b) => b.s - a.s).slice(0, 5);
+  resetMatch(s, 'attract');
+  try {
+    Promise.resolve(window.platanusArcadeStorage.set(TOP_KEY, s.top)).catch(() => {});
+  } catch (e) {}
 }
 
 async function lockTurn(s) {
@@ -2332,7 +2383,7 @@ function drawWorld(s, time, delta) {
     const n = s.view[1 - i];
     const near = Math.abs(v.gx - n.gx) + Math.abs(v.gy - n.gy) < 3;
     const off = near ? Math.sign(v.gx + v.gy - n.gx - n.gy || i * 2 - 1) * 22 : 0;
-    drawMiniBar(gu, p.x + off, p.y + 12, s.dispHp[i] / HP_MAX, unitColor(i));
+    drawMiniBar(gu, p.x + off, p.y + 12, s.dispHp[i] / s.state.units[i].mx, unitColor(i));
     s.ui.tags[i].setPosition(p.x + off, p.y + 25);
     const stName = ['P1', 'CPU'][i] + (v.st ? '  ' + ST_NAME[v.st] : '') + (s.state.units[i].open ? '  OPEN' : '');
     setT(s.ui.tags[i], stName);
@@ -2386,7 +2437,7 @@ function drawHud(s, time) {
     drawLabelSlab(g, x0, 9, 222, 56, color, false);
     const bx = x0 + 12;
     const bw = 198;
-    const hp = Math.max(0, s.dispHp[i]) / HP_MAX;
+    const hp = Math.max(0, s.dispHp[i]) / u.mx;
     g.fS(0x02070c, 1);
     g.fR(bx, 34, bw, 11);
     g.fS(color, 0.95);
@@ -2403,7 +2454,7 @@ function drawHud(s, time) {
     g.fR(i ? gx + 60 - gw : gx, 53, gw, 5);
     ui.names[i].setPosition(i ? W - 28 : 28, 21);
     ui.status[i].setPosition(i ? W - 84 : 84, 57);
-    setT(ui.names[i], (i ? 'CPU CABIMAS' : 'P1 MARACAIBO') + ' // HP ' + Math.max(0, s.dispHp[i]));
+    setT(ui.names[i], (i ? 'CPU LV' + s.stage : 'P1 MARACAIBO') + ' // HP ' + Math.max(0, s.dispHp[i]));
     const stLabel = ST_NAME[u.st] || '';
     setT(ui.status[i], [stLabel, u.open && 'OPEN', u.od && 'OVERDRIVE ' + u.od, u.momentum && 'MOMENTUM', canUse(u, 'burst') && 'BURST READY'].filter(Boolean).join(' // '));
   });
@@ -2534,14 +2585,19 @@ function drawHud(s, time) {
   let titleColor = C_p1;
   const blinkOn = Math.floor(time / 450) % 2 === 0;
   if (!play) {
-    const card = CARDS[Math.floor((time - s.attractStart) / CARD_MS) % CARDS.length];
+    const cards = s.top.length ? [...CARDS, ['TOP PILOTS', s.top.map((e, k) => k + 1 + '. ' + e.n + '  ' + e.s).join('\n')]] : CARDS;
+    const card = cards[Math.floor((time - s.attractStart) / CARD_MS) % cards.length];
     title = card[0];
     sub = card[1] + '\n\n' + (blinkOn ? 'PRESS START' : ' ');
   } else if (s.phase === 'over') {
     const o = s.state.over;
-    title = o === 'p1' ? 'VICTORY' : o === 'cpu' ? 'DEFEATED' : 'DRAW';
+    title = o === 'p1' ? 'STAGE ' + s.stage + ' CLEAR' : o === 'cpu' ? 'DEFEATED' : 'DRAW';
     titleColor = o === 'p1' ? C_p1 : o === 'cpu' ? C_cpu : C_bolt;
-    sub = time > s.phaseStart + ATTRACT_OVER_MS && blinkOn ? 'PRESS START' : ' ';
+    sub = 'SCORE ' + s.score + '\n' + (time > s.phaseStart + ATTRACT_OVER_MS && blinkOn ? (o === 'p1' ? 'PRESS START: NEXT PILOT' : 'PRESS START') : ' ');
+  } else if (s.phase === 'name') {
+    title = 'NEW RECORD';
+    titleColor = C_bolt;
+    sub = 'SCORE ' + s.score + '\n' + initials(s.ini).split('').map((ch, k) => (k === s.iniPos ? '[' + ch + ']' : ' ' + ch + ' ')).join(' ') + '\nUP/DOWN LETTER   B1 NEXT';
   }
   if (title) {
     drawLabelSlab(g, W / 2 - 222, 112, 444, 52, titleColor, true);
