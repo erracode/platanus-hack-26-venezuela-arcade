@@ -1,30 +1,30 @@
 // Mecha Simultactics: Catatumbo Protocol — Platanus Hack 26 Arcade Challenge
 // Simultaneous-turn mecha duel vs CPU over Lake Maracaibo. See SPEC.md / ROADMAP.md.
 
+// Everything lives in an IIFE so the minifier can mangle top-level names (~5KB saved).
+(() => {
 // == CONSTANTS ==
 
 const W = 800;
 const H = 600;
 
-const COLORS = {
-  bg: 0x071019,
-  p1: 0x35e9f2,
-  cpu: 0xff315f,
-  coast: 0xe2c990,
-  bolt: 0xffe45c,
-  white: 0xf4f2e7,
-  ink: 0x050b12,
-  water: 0x07556a,
-  waterHi: 0x08788c,
-  waterLo: 0x042f41,
-  land: 0x294c35,
-  landMid: 0x183426,
-  landDark: 0x0b211a,
-  concrete: 0xc8c9c3,
-  steel: 0x687983,
-  wood: 0x75452f,
-  rust: 0xb65e3d,
-};
+// Palette as standalone consts so the minifier can mangle them.
+const C_bg = 0x071019;
+const C_p1 = 0x35e9f2;
+const C_cpu = 0xff315f;
+const C_coast = 0xe2c990;
+const C_bolt = 0xffe45c;
+const C_white = 0xf4f2e7;
+const C_ink = 0x050b12;
+const C_water = 0x07556a;
+const C_waterHi = 0x08788c;
+const C_waterLo = 0x042f41;
+const C_land = 0x294c35;
+const C_landMid = 0x183426;
+const C_landDark = 0x0b211a;
+const C_concrete = 0xc8c9c3;
+const C_wood = 0x75452f;
+const C_rust = 0xb65e3d;
 
 // Iso tile size (px) and vertical extrusions.
 const TW = 44;
@@ -824,14 +824,14 @@ function cellPts(x, y) {
 const EDGE = { N: [3, 0], E: [0, 1], S: [1, 2], W: [2, 3] };
 
 // Solid extruded rhombus with a fixed upper-left key light.
-function drawPrism(g, cx, cy, hw, hh, h, color, mid = COLORS.landMid, dark = COLORS.landDark) {
+function drawPrism(g, cx, cy, hw, hh, h, color, mid = C_landMid, dark = C_landDark) {
   const top = rhombus(cx, cy - h, hw, hh);
   const left = [top[3], top[2], { x: cx, y: cy + hh }, { x: cx - hw, y: cy }];
   const right = [top[2], top[1], { x: cx + hw, y: cy }, { x: cx, y: cy + hh }];
   [[left, mid], [right, dark], [top, color]].forEach(([face, fill]) => {
     g.fillStyle(fill, 1);
     g.fillPoints(face, true);
-    g.lineStyle(1, COLORS.ink, 0.9);
+    g.lineStyle(1, C_ink, 0.9);
     g.strokePoints(face, true);
   });
 }
@@ -852,7 +852,7 @@ function drawSlab(g) {
     const quad = [a, b, { x: b.x, y: b.y + SLAB_H }, { x: a.x, y: a.y + SLAB_H }];
     g.fillStyle(a.x < b.x ? 0x102b25 : 0x081a1d, 1);
     g.fillPoints(quad, true);
-    g.lineStyle(1.5, COLORS.ink, 1);
+    g.lineStyle(1.5, C_ink, 1);
     g.strokePoints(quad, true);
     g.lineStyle(1, 0x376153, 0.42);
     g.lineBetween(a.x, a.y + 4, b.x, b.y + 4);
@@ -866,8 +866,8 @@ function drawSlab(g) {
 }
 
 function drawTiles(g) {
-  const landTones = [COLORS.land, 0x31583b, 0x3a5235, 0x24442f];
-  const waterTones = [COLORS.water, 0x075f72, 0x08687a, COLORS.waterHi];
+  const landTones = [C_land, 0x31583b, 0x3a5235, 0x24442f];
+  const waterTones = [C_water, 0x075f72, 0x08687a, C_waterHi];
   for (let y = 0; y < ROWS; y++) {
     for (let x = 0; x < COLS; x++) {
       const t = tileAt(x, y);
@@ -881,7 +881,7 @@ function drawTiles(g) {
       if (t === 7) color = 0x174956;
       g.fillStyle(color, 1);
       g.fillPoints(pts, true);
-      g.lineStyle(1, water ? COLORS.waterLo : COLORS.landDark, water ? 0.48 : 0.72);
+      g.lineStyle(1, water ? C_waterLo : C_landDark, water ? 0.48 : 0.72);
       g.strokePoints(pts, true);
 
       // Deterministic micro-texture: short ripples, tiny facets and sparse dither.
@@ -913,7 +913,7 @@ function drawTiles(g) {
       } else if (t === 7) {
         g.fillStyle(0xd58339, 0.92);
         g.fillCircle(c.x, c.y, 3);
-        g.lineStyle(1, COLORS.bolt, 0.55);
+        g.lineStyle(1, C_bolt, 0.55);
         g.strokeCircle(c.x, c.y, 5);
       }
     }
@@ -923,7 +923,7 @@ function drawTiles(g) {
 // Carved shoreline: charcoal cut with a restrained sunlit rim.
 function drawShore(g) {
   for (let pass = 0; pass < 3; pass++) {
-    g.lineStyle(pass === 0 ? 5 : pass === 1 ? 2.5 : 1, pass === 0 ? COLORS.ink : pass === 1 ? COLORS.coast : COLORS.white, pass === 2 ? 0.55 : 1);
+    g.lineStyle(pass === 0 ? 5 : pass === 1 ? 2.5 : 1, pass === 0 ? C_ink : pass === 1 ? C_coast : C_white, pass === 2 ? 0.55 : 1);
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
         if (!isLake(x, y)) continue;
@@ -955,14 +955,14 @@ function drawHut(g, cx, cy) {
     g.fillStyle(0x02070a, 0.45);
     g.fillPoints(rhombus(x + 5, y + 4, hw + 3, hh + 2), true);
     const base = y - 10 * scale;
-    drawPrism(g, x, base, hw, hh, 8 * scale, COLORS.rust, COLORS.wood, 0x3d241f);
+    drawPrism(g, x, base, hw, hh, 8 * scale, C_rust, C_wood, 0x3d241f);
     const roof = rhombus(x, base - 8 * scale, hw + 4, hh + 3);
     const apex = { x: x - 2, y: base - 21 * scale };
     g.fillStyle(0xd4774a, 1);
     g.fillPoints([roof[3], roof[2], apex], true);
     g.fillStyle(0x783c32, 1);
     g.fillPoints([roof[2], roof[1], apex], true);
-    g.lineStyle(1.5, COLORS.ink, 1);
+    g.lineStyle(1.5, C_ink, 1);
     g.strokePoints([roof[3], apex, roof[1], roof[2]], true);
     g.fillStyle(0xffc76a, 0.75);
     g.fillRect(x - 2, base - 6 * scale, 4, 3);
@@ -994,9 +994,9 @@ function drawBridge(g) {
   g.fillPoints(deck.map((p) => ({ x: p.x + 8, y: p.y + 11 })), true);
   g.fillStyle(0x46545b, 1);
   g.fillPoints([deck[1], deck[2], { x: deck[2].x, y: deck[2].y + 7 }, { x: deck[1].x, y: deck[1].y + 7 }], true);
-  g.fillStyle(COLORS.concrete, 1);
+  g.fillStyle(C_concrete, 1);
   g.fillPoints(deck, true);
-  g.lineStyle(2, COLORS.ink, 1);
+  g.lineStyle(2, C_ink, 1);
   g.strokePoints(deck, true);
   g.lineStyle(1, 0xf2e7c5, 0.85);
   g.lineBetween(a.x, a.y - DECK_H, b.x, b.y - DECK_H);
@@ -1005,7 +1005,7 @@ function drawBridge(g) {
     const t = toIso(x, row);
     g.fillStyle(0x26363d, 0.7);
     g.fillPoints([{ x: t.x - 5, y: t.y + 2 }, { x: t.x + 2, y: t.y - 1 }, { x: t.x + 4, y: t.y + 21 }, { x: t.x - 3, y: t.y + 23 }], true);
-    g.lineStyle(1.5, COLORS.ink, 1);
+    g.lineStyle(1.5, C_ink, 1);
     g.strokePoints([{ x: t.x - 5, y: t.y + 2 }, { x: t.x + 2, y: t.y - 1 }, { x: t.x + 4, y: t.y + 21 }, { x: t.x - 3, y: t.y + 23 }], true);
   }
   for (const x of [xs[0], xs[xs.length - 1]]) {
@@ -1016,7 +1016,7 @@ function drawBridge(g) {
     g.lineStyle(7, 0x596970, 1);
     g.lineBetween(t.x - 9, deckY + 2, t.x, topY);
     g.lineBetween(t.x + 9, deckY + 2, t.x, topY);
-    g.lineStyle(3, COLORS.concrete, 1);
+    g.lineStyle(3, C_concrete, 1);
     g.lineBetween(t.x - 8, deckY, t.x, topY);
     g.lineBetween(t.x + 8, deckY, t.x, topY);
     g.lineBetween(t.x - 5, topY + 22, t.x + 5, topY + 22);
@@ -1026,7 +1026,7 @@ function drawBridge(g) {
       g.lineBetween(t.x, topY + 3, t.x - off, deckY + off / 2);
       g.lineBetween(t.x, topY + 3, t.x + off, deckY - off / 2);
     }
-    g.fillStyle(COLORS.bolt, 0.9);
+    g.fillStyle(C_bolt, 0.9);
     g.fillCircle(t.x, topY, 2);
   }
 }
@@ -1061,7 +1061,7 @@ function drawMap(g) {
 }
 
 function drawBackground(g) {
-  g.fillStyle(COLORS.bg, 1);
+  g.fillStyle(C_bg, 1);
   g.fillRect(0, 0, WORLD_W, WORLD_H);
   g.fillStyle(0x0b1b27, 1);
   g.fillRect(0, 0, WORLD_W, 390);
@@ -1131,7 +1131,7 @@ function mechTone(c, k, flash) {
 
 // Tiny orthographic software renderer: transform, pose, back-face cull, light and painter-sort.
 function drawMecha(g, gx, gy, facing, color, alpha, flash, stance, pose = 'idle', frame = 0) {
-  const c = toIso(gx, gy), d = DIRS[facing], pal = MECH_PALS[color === COLORS.cpu ? 1 : 0];
+  const c = toIso(gx, gy), d = DIRS[facing], pal = MECH_PALS[color === C_cpu ? 1 : 0];
   const st = stance || 0, tilt = st === ST_STAGGERED ? -0.15 : st === ST_KNOCKBACK ? 0.17 : 0;
   const sn = Math.sin(tilt), co = Math.cos(tilt), down = st === ST_DOWN;
   const lift = pose === 'move' ? [4, 12, 3][frame] : 0;
@@ -1193,23 +1193,23 @@ function drawMecha(g, gx, gy, facing, color, alpha, flash, stance, pose = 'idle'
   faces.sort((a, b) => a.d - b.d);
   for (const f of faces) {
     g.fillStyle(f.c, alpha); g.fillPoints(f.p, true);
-    g.lineStyle(1.35, COLORS.ink, alpha * 0.9); g.strokePoints(f.p, true);
+    g.lineStyle(1.35, C_ink, alpha * 0.9); g.strokePoints(f.p, true);
   }
-  const energy = flash ? COLORS.white : pal[3];
+  const energy = flash ? C_white : pal[3];
   if (pose === 'move') for (const x of [-7, 7]) {
     const a = P(9, x, 49, -11), b = P(9, x, 46, -34 - frame * 6);
-    g.lineStyle(10, COLORS.ink, alpha); g.lineBetween(a[3], a[4], b[3], b[4]);
+    g.lineStyle(10, C_ink, alpha); g.lineBetween(a[3], a[4], b[3], b[4]);
     g.lineStyle(6, energy, alpha); g.lineBetween(a[3], a[4], b[3], b[4]);
-    g.lineStyle(2, COLORS.white, alpha); g.lineBetween(a[3], a[4], b[3], b[4]);
+    g.lineStyle(2, C_white, alpha); g.lineBetween(a[3], a[4], b[3], b[4]);
   }
   // Visor is permanent; the energy blade exists only during an attack pose.
   const va = P(16, -5, 64, 7.3), vb = P(16, 5, 64, 7.3);
-  g.lineStyle(4, COLORS.ink, alpha); g.lineBetween(va[3], va[4], vb[3], vb[4]);
+  g.lineStyle(4, C_ink, alpha); g.lineBetween(va[3], va[4], vb[3], vb[4]);
   g.lineStyle(2.5, energy, alpha); g.lineBetween(va[3], va[4], vb[3], vb[4]);
   if (blade) {
     const sa = P(17, 18, 31, 3), sb = P(17, 18, 31, 28);
     g.lineStyle(3, energy, alpha); g.lineBetween(sa[3], sa[4], sb[3], sb[4]);
-    g.lineStyle(1, COLORS.white, alpha); g.lineBetween(sa[3], sa[4], sb[3], sb[4]);
+    g.lineStyle(1, C_white, alpha); g.lineBetween(sa[3], sa[4], sb[3], sb[4]);
   }
 }
 
@@ -1229,9 +1229,9 @@ function drawLabelSlab(g, x, y, w, h, color, selected) {
 
 function drawBolt(g, fx) {
   const life = (fx.until - fx.now) / fx.dur;
-  g.lineStyle(3, COLORS.bolt, life);
+  g.lineStyle(3, C_bolt, life);
   g.strokePoints(fx.pts, false);
-  g.lineStyle(1, COLORS.white, life);
+  g.lineStyle(1, C_white, life);
   g.strokePoints(fx.pts, false);
 }
 
@@ -1246,7 +1246,7 @@ function makeBoltPoints(x, y) {
   return pts;
 }
 
-const unitColor = (i) => (i ? COLORS.cpu : COLORS.p1);
+const unitColor = (i) => (i ? C_cpu : C_p1);
 
 // "Locked in" check mark above a unit.
 function drawCheck(g, x, y, color) {
@@ -1254,7 +1254,7 @@ function drawCheck(g, x, y, color) {
   g.fillCircle(x, y, 9);
   g.lineStyle(2, color, 1);
   g.strokeCircle(x, y, 9);
-  g.lineStyle(2.5, COLORS.white, 1);
+  g.lineStyle(2.5, C_white, 1);
   g.lineBetween(x - 4, y, x - 1, y + 4);
   g.lineBetween(x - 1, y + 4, x + 5, y - 4);
 }
@@ -1296,14 +1296,14 @@ function drawSweep(g, gx, gy, facing, color, a, kind) {
     { x: c.x + v.x * 1.55, y: c.y + v.y * 1.55 - 26 },
     { x: c.x + v.x * 3, y: c.y + v.y * 3 - 10 },
   ];
-  g.lineStyle(12, COLORS.ink, 0.72 * a);
+  g.lineStyle(12, C_ink, 0.72 * a);
   g.strokePoints(arc, false);
   g.lineStyle(7, color, 0.7 * a);
   g.strokePoints(arc, false);
-  g.lineStyle(2.5, COLORS.white, a);
+  g.lineStyle(2.5, C_white, a);
   g.strokePoints(arc, false);
   const q = arc[2];
-  g.fillStyle(COLORS.white, a);
+  g.fillStyle(C_white, a);
   g.fillTriangle(q.x, q.y, q.x - 7, q.y - 5, q.x - 2, q.y + 6);
 }
 
@@ -1312,11 +1312,11 @@ function drawGuard(g, gx, gy, facing, a) {
   const shield = [{ x: p.x, y: p.y - 7 }, { x: q.x, y: q.y - 7 }, { x: q.x + 3, y: q.y - 28 }, { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 - 38 }, { x: p.x - 3, y: p.y - 28 }];
   g.fillStyle(0x143c54, 0.38 * a);
   g.fillPoints(shield, true);
-  g.lineStyle(7, COLORS.ink, 0.8 * a);
+  g.lineStyle(7, C_ink, 0.8 * a);
   g.strokePoints(shield, false);
-  g.lineStyle(3, COLORS.p1, a);
+  g.lineStyle(3, C_p1, a);
   g.strokePoints(shield, false);
-  g.lineStyle(1.5, COLORS.white, 0.9 * a);
+  g.lineStyle(1.5, C_white, 0.9 * a);
   g.lineBetween(shield[0].x + 3, shield[0].y - 3, shield[3].x, shield[3].y + 5);
   g.lineBetween(shield[3].x, shield[3].y + 5, shield[1].x - 3, shield[1].y - 3);
 }
@@ -1327,9 +1327,9 @@ function drawShards(g, x, y, color, a) {
     const r = 19 + (k % 3) * 9;
     const sx = x + Math.cos(ang) * r;
     const sy = y + Math.sin(ang) * r * 0.65;
-    g.lineStyle(2, k & 1 ? color : COLORS.white, a * 0.7);
+    g.lineStyle(2, k & 1 ? color : C_white, a * 0.7);
     g.lineBetween(x, y, sx, sy);
-    g.fillStyle(k & 1 ? color : COLORS.white, a * (0.55 + (k % 2) * 0.35));
+    g.fillStyle(k & 1 ? color : C_white, a * (0.55 + (k % 2) * 0.35));
     g.fillTriangle(sx, sy, sx - Math.cos(ang + 0.7) * 9, sy - Math.sin(ang + 0.7) * 6, sx - Math.cos(ang - 0.5) * 4, sy - Math.sin(ang - 0.5) * 4);
   }
 }
@@ -1441,9 +1441,9 @@ function setT(t, s) {
 
 function createUi(scene) {
   return {
-    names: [txt(scene, 30, 24, 14, hex(COLORS.p1)), txt(scene, W - 30, 24, 14, hex(COLORS.cpu), 1)],
+    names: [txt(scene, 30, 24, 14, hex(C_p1)), txt(scene, W - 30, 24, 14, hex(C_cpu), 1)],
     status: [txt(scene, 100, 58, 11, '#ffffff'), txt(scene, W - 100, 58, 11, '#ffffff', 1)],
-    tags: [txt(scene, 0, 0, 10, hex(COLORS.p1), 0.5), txt(scene, 0, 0, 10, hex(COLORS.cpu), 0.5)],
+    tags: [txt(scene, 0, 0, 10, hex(C_p1), 0.5), txt(scene, 0, 0, 10, hex(C_cpu), 0.5)],
     info: [txt(scene, W / 2, 22, 13, '#ffffff', 0.5), txt(scene, W / 2, 42, 10, '#c8ccd8', 0.5), txt(scene, W / 2, 56, 10, '#c8ccd8', 0.5)],
     phase: txt(scene, W / 2, H - 56, 16, '#ffffff', 0.5),
     hint: txt(scene, W / 2, H - 34, 11, '#9aa0b0', 0.5),
@@ -1919,7 +1919,7 @@ async function playEvents(s, events, token) {
       }));
       ei = end - 1;
     } else if (e.t === 'bump') {
-      floatText(s, u, 'BLOCKED', COLORS.white, 12);
+      floatText(s, u, 'BLOCKED', C_white, 12);
       await wait(s, 300);
     } else if (e.t === 'guard') {
       addFx(s, { kind: 'guard', who: e.who, dur: 4000 });
@@ -1947,56 +1947,56 @@ async function playEvents(s, events, token) {
     } else if (e.t === 'hit') {
       u.flash = 1;
       const hitAt = toIso(u.gx, u.gy);
-      addFx(s, { kind: 'shards', x: hitAt.x, y: hitAt.y - 30, color: e.who ? COLORS.cpu : COLORS.p1, dur: 380 });
+      addFx(s, { kind: 'shards', x: hitAt.x, y: hitAt.y - 30, color: e.who ? C_cpu : C_p1, dur: 380 });
       s.dispHp[e.who] = Math.max(0, s.dispHp[e.who] - e.dmg);
       const dmgText = 'HIT!! -' + e.dmg + (e.flank ? ' FLANK!' : '') + (e.slam ? ' SLAM!' : '');
-      floatText(s, u, dmgText, COLORS.white, 17);
+      floatText(s, u, dmgText, C_white, 17);
       // Combo bonus: if the target was in a non-normal stance, shout it.
       const targetSt = e.prevSt || ST_NORMAL;
-      if (targetSt > ST_NORMAL) floatText(s, u, 'COMBO!', COLORS.bolt, 14);
+      if (targetSt > ST_NORMAL) floatText(s, u, 'COMBO!', C_bolt, 14);
       shake(140, 0.008);
       s.sfx.hit();
       await wait(s, HIT_PAUSE_MS);
     } else if (e.t === 'parry') {
-      floatText(s, u, 'PARRY! +1', COLORS.coast, 17);
+      floatText(s, u, 'PARRY! +1', C_coast, 17);
       addFx(s, { kind: 'flash', dur: 120 });
       s.sfx.parry();
       await wait(s, HIT_PAUSE_MS);
     } else if (e.t === 'interrupt') {
-      floatText(s, u, ACTIONS[e.act].name + ' LOST', COLORS.bolt, 13, 1300);
+      floatText(s, u, ACTIONS[e.act].name + ' LOST', C_bolt, 13, 1300);
       await wait(s, 450);
     } else if (e.t === 'knock') {
       for (const c of e.path) await tweenTo(s, u, c.x, c.y, STEP_MS * 0.7);
     } else if (e.t === 'caught') {
-      floatText(s, u, 'CAUGHT!', COLORS.bolt, 17);
+      floatText(s, u, 'CAUGHT!', C_bolt, 17);
       s.sfx.hit();
       await wait(s, 400);
     } else if (e.t === 'throw') {
       floatText(s, u, 'THROW!', unitColor(e.who), 17);
       await wait(s, 200);
     } else if (e.t === 'momentum') {
-      floatText(s, u, 'MOMENTUM', COLORS.bolt, 13);
+      floatText(s, u, 'MOMENTUM', C_bolt, 13);
     } else if (e.t === 'burst') {
       u.st = ST_NORMAL;
-      floatText(s, u, 'BURST!', COLORS.bolt, 17);
+      floatText(s, u, 'BURST!', C_bolt, 17);
       addFx(s, { kind: 'flash', dur: 120 });
       s.sfx.clash();
       await wait(s, 300);
     } else if (e.t === 'stance') {
       u.st = e.st;
-      const stColors = [COLORS.coast, COLORS.bolt, COLORS.cpu, COLORS.white];
+      const stColors = [C_coast, C_bolt, C_cpu, C_white];
       const stLabel = ['RECOVERED', 'STAGGERED', 'KNOCKBACK', 'DOWN'][e.st];
-      addFx(s, { kind: 'flash', color: stColors[e.st] || COLORS.white, dur: 180 });
-      if (stLabel) floatText(s, u, stLabel, stColors[e.st] || COLORS.white, 16);
+      addFx(s, { kind: 'flash', color: stColors[e.st] || C_white, dur: 180 });
+      if (stLabel) floatText(s, u, stLabel, stColors[e.st] || C_white, 16);
       await wait(s, 250);
     } else if (e.t === 'zone') {
       const zLabel = e.zone + (e.dmg ? ' -' + e.dmg : '') + (e.guts ? ' +1 GUTS' : '') + (e.push ? ' SLIP!' : '') + (e.st ? ' ' + ST_NAME[e.st] : '');
       if (e.zone === 'CAT') {
         const strike = toIso(u.gx, u.gy);
         addFx(s, { kind: 'bolt', pts: makeBoltPoints(strike.x, strike.y - 22), dur: 500 });
-        addFx(s, { kind: 'shards', x: strike.x, y: strike.y - 20, color: COLORS.bolt, dur: 420 });
+        addFx(s, { kind: 'shards', x: strike.x, y: strike.y - 20, color: C_bolt, dur: 420 });
       }
-      floatText(s, u, zLabel, e.color || COLORS.bolt, 14);
+      floatText(s, u, zLabel, e.color || C_bolt, 14);
       if (e.dmg) {
         s.dispHp[e.who] = Math.max(0, s.dispHp[e.who] - e.dmg);
         u.flash = 0.6;
@@ -2008,12 +2008,12 @@ async function playEvents(s, events, token) {
         for (const c of e.path) await tweenTo(s, u, c.x, c.y, STEP_MS * 0.7);
       }
       if (e.guts) s.sfx.blip();
-      addFx(s, { kind: 'flash', color: e.color || COLORS.bolt, dur: 100 });
+      addFx(s, { kind: 'flash', color: e.color || C_bolt, dur: 100 });
       await wait(s, 400);
     } else if (e.t === 'clash' || e.t === 'mirror') {
       const m = toIso((v[0].gx + v[1].gx) / 2, (v[0].gy + v[1].gy) / 2);
       addFx(s, { kind: 'bolt', pts: makeBoltPoints(m.x, m.y - 24), dur: 550 });
-      addFx(s, { kind: 'shards', x: m.x, y: m.y - 24, color: COLORS.cpu, dur: 520 });
+      addFx(s, { kind: 'shards', x: m.x, y: m.y - 24, color: C_cpu, dur: 520 });
       addFx(s, { kind: 'flash', dur: 180 });
       shake(220, 0.012);
       s.sfx.clash();
@@ -2059,24 +2059,24 @@ function drawWorld(s, time, delta) {
       }
       const path = sel.valid.get(sel.cur.x + ',' + sel.cur.y);
       if (path) {
-        g.lineStyle(2, COLORS.white, 0.8);
+        g.lineStyle(2, C_white, 0.8);
         g.strokePoints([me, ...path].map((c) => toIso(c.x, c.y)), false);
       }
-      drawCell(g, sel.cur.x, sel.cur.y, COLORS.white, 0.15 + 0.15 * blink, 1);
+      drawCell(g, sel.cur.x, sel.cur.y, C_white, 0.15 + 0.15 * blink, 1);
     }
     if (s.phase === 'aim' && a.target === 'dir') {
       for (const [stick, dir] of Object.entries(STICK_TO_DIR)) {
         const n = step(me, dir);
         const p = toIso(n.x, n.y);
-        drawArrow(g, p.x, p.y, stick, dir === sel.dir ? COLORS.white : 0x5a6070);
+        drawArrow(g, p.x, p.y, stick, dir === sel.dir ? C_white : 0x5a6070);
       }
       if (sel.act === 'lunge') {
         const path = dashPath(me, sel.dir, LUNGE_DASH, s.state.units[1]);
-        path.forEach((c) => drawCell(g, c.x, c.y, COLORS.bolt, 0.1, 0.5));
+        path.forEach((c) => drawCell(g, c.x, c.y, C_bolt, 0.1, 0.5));
       }
       if (sel.act !== 'pivot') {
         const end = previewPlan(me, { act: sel.act, dir: sel.dir }, s.state.units[1]);
-        const col = sel.act === 'parry' ? COLORS.white : COLORS.cpu;
+        const col = sel.act === 'parry' ? C_white : C_cpu;
         const atkTiles =
           sel.act === 'vslash'
             ? vslashTiles({ x: end.x, y: end.y, facing: sel.dir })
@@ -2097,10 +2097,10 @@ function drawWorld(s, time, delta) {
       const n = step(foe, dir);
       if (same(n, me)) continue;
       const p = toIso(n.x, n.y);
-      drawArrow(g, p.x, p.y, stick, dir === s.throwDir ? COLORS.white : 0x5a6070);
+      drawArrow(g, p.x, p.y, stick, dir === s.throwDir ? C_white : 0x5a6070);
     }
     const path = dashPath(foe, s.throwDir, THROW_DIST, me);
-    path.forEach((c) => drawCell(g, c.x, c.y, COLORS.bolt, 0.15 + 0.15 * blink, 0.8));
+    path.forEach((c) => drawCell(g, c.x, c.y, C_bolt, 0.15 + 0.15 * blink, 0.8));
   }
 
   const gu = s.gUnits;
@@ -2108,7 +2108,7 @@ function drawWorld(s, time, delta) {
   const order = s.view.map((v, i) => ({ v, i })).sort((a, b) => a.v.gy - a.v.gx - (b.v.gy - b.v.gx));
   for (const { v, i } of order) {
     v.flash = Math.max(0, v.flash - delta / 250);
-    if (i === 0 && ghost) drawMecha(gu, ghost.x, ghost.y, ghost.facing, COLORS.p1, 0.35, 0, 0, 'idle', 0);
+    if (i === 0 && ghost) drawMecha(gu, ghost.x, ghost.y, ghost.facing, C_p1, 0.35, 0, 0, 'idle', 0);
     drawMecha(gu, v.gx, v.gy, v.facing, unitColor(i), 1, v.flash, v.st, v.pose, v.frame);
     const p = toIso(v.gx, v.gy);
     const n = s.view[1 - i];
@@ -2127,7 +2127,7 @@ function drawWorld(s, time, delta) {
   if (play) {
     const p = toIso(s.view[1].gx, s.view[1].gy);
     const r = 27 + blink * 3;
-    gt.lineStyle(2, COLORS.cpu, 0.4 + blink * 0.5);
+    gt.lineStyle(2, C_cpu, 0.4 + blink * 0.5);
     gt.strokeCircle(p.x, p.y - 30, r);
     gt.lineBetween(p.x - r - 7, p.y - 30, p.x - r + 5, p.y - 30);
     gt.lineBetween(p.x + r - 5, p.y - 30, p.x + r + 7, p.y - 30);
@@ -2141,7 +2141,7 @@ function drawWorld(s, time, delta) {
     else if (f.kind === 'guard') drawGuard(gt, s.view[f.who].gx, s.view[f.who].gy, s.view[f.who].facing, a);
     else if (f.kind === 'shards') drawShards(gt, f.x, f.y, f.color, a);
     else if (f.kind === 'flash') {
-      gt.fillStyle(f.color || COLORS.white, 0.35 * a);
+      gt.fillStyle(f.color || C_white, 0.35 * a);
       gt.fillRect(0, 0, W, H);
     }
   }
@@ -2174,13 +2174,13 @@ function drawHud(s, time) {
     g.fillStyle(color, 0.95);
     if (i) g.fillRect(bx + bw * (1 - hp), 35, bw * hp, 9);
     else g.fillRect(bx, 35, bw * hp, 9);
-    g.lineStyle(1, COLORS.ink, 0.9);
+    g.lineStyle(1, C_ink, 0.9);
     for (let k = 1; k < 10; k++) g.lineBetween(bx + (bw * k) / 10, 35, bx + (bw * k) / 10, 44);
     for (let k = 0; k < GUTS_MAX; k++) {
       const px = i ? x0 + 202 - k * 14 : x0 + 18 + k * 14;
-      g.fillStyle(COLORS.bolt, u.guts > k ? 1 : 0.16);
+      g.fillStyle(C_bolt, u.guts > k ? 1 : 0.16);
       g.fillPoints(rhombus(px, 56, 5, 5), true);
-      g.lineStyle(1, COLORS.bolt, 0.55);
+      g.lineStyle(1, C_bolt, 0.55);
       g.strokePoints(rhombus(px, 56, 5, 5), true);
     }
     ui.names[i].setPosition(i ? W - 28 : 28, 21);
@@ -2201,7 +2201,7 @@ function drawHud(s, time) {
     info = available
       ? [a.name + '  //  SPD ' + speedOf(units[0], plan), a.info[0], a.info[1]]
       : [a.name + '  //  LOCKED', units[0].st === ST_NORMAL ? 'NEEDS MOMENTUM' : 'ONLY BURST BREAKS KNOCKBACK', units[0].st === ST_NORMAL ? 'MOVE FORWARD 3 TILES THE TURN BEFORE' : 'FULL GUTS REQUIRED'];
-    drawLabelSlab(g, 244, 9, 312, 56, COLORS.p1, false);
+    drawLabelSlab(g, 244, 9, 312, 56, C_p1, false);
   }
   info.forEach((t, k) => setT(ui.info[k], t));
 
@@ -2243,7 +2243,7 @@ function drawHud(s, time) {
     const side = s.menuPos.col ? 1 : -1;
     const ax = Math.max(68, Math.min(W - 68, cx + side * 128));
     const y0 = Math.max(118, Math.min(H - 177 - col.length * 22, cy - ((col.length - 1) * 22) / 2));
-    arc(cx, cy - 8, 112, side > 0 ? -1 : 2.1, side > 0 ? 1 : 4.2, COLORS.p1, 2, 0.4);
+    arc(cx, cy - 8, 112, side > 0 ? -1 : 2.1, side > 0 ? 1 : 4.2, C_p1, 2, 0.4);
     col.forEach((act, ri) => {
       const d = ri - (col.length - 1) / 2;
       items.push({ kind: 'act', x: ax - side * d * d * 4, y: y0 + ri * 24, label: ACTIONS[act].name, on: s.menuPos.row === ri, off: !canUse(units[0], act) });
@@ -2253,9 +2253,9 @@ function drawHud(s, time) {
     const cx = Math.max(120, Math.min(W - 120, p.x));
     const cy = Math.max(150, Math.min(H - 170, p.y - 26));
     arc(cx, cy, 62, -2.8, 0.35, 0x2d0713, 16, 0.82);
-    arc(cx, cy, 62, -2.8, 0.35, COLORS.cpu, 4, 1);
-    arc(cx, cy, 79, -0.15, 2.65, COLORS.cpu, 3, 0.65);
-    drawShards(g, cx, cy, COLORS.cpu, 0.9);
+    arc(cx, cy, 62, -2.8, 0.35, C_cpu, 4, 1);
+    arc(cx, cy, 79, -0.15, 2.65, C_cpu, 3, 0.65);
+    drawShards(g, cx, cy, C_cpu, 0.9);
     const opts = units[0].guts >= GUTS_MAX ? ['THRUST', 'PARRY', 'FEINT', 'BURST'] : ['THRUST', 'PARRY', 'FEINT'];
     const side = cx < 530 ? 1 : -1;
     const cardX = side > 0 ? Math.min(W - 174, cx + 88) : Math.max(14, cx - 262);
@@ -2270,7 +2270,7 @@ function drawHud(s, time) {
         : [{ x, y: y + 4 }, { x: x + w - cut, y }, { x: x + w, y: y + 34 }, { x: x + 12, y: y + 38 }];
       g.fillStyle(0x010308, 0.97);
       g.fillPoints(card, true);
-      g.lineStyle(4, COLORS.cpu, 1);
+      g.lineStyle(4, C_cpu, 1);
       g.strokePoints(card, true);
       g.lineStyle(1.5, 0xff91a9, 0.8);
       g.lineBetween(x + 15, y + 32, x + 113, y + 35);
@@ -2284,9 +2284,9 @@ function drawHud(s, time) {
     t.setVisible(!!it);
     if (!it) return;
     // Pool objects stay API-minimal for the cabinet harness; geometry carries hierarchy.
-    if (it.kind === 'cat') drawLabelSlab(g, it.x - 47, it.y - 11, 94, 22, COLORS.p1, it.on);
-    if (it.kind === 'act') drawLabelSlab(g, it.x - (it.on ? 59 : 52), it.y - 10, it.on ? 118 : 104, 20, COLORS.p1, it.on);
-    t.setColor(it.on || it.kind === 'clash' ? '#ffffff' : it.kind === 'key' ? '#ff9ab1' : it.off ? '#53616a' : it.kind === 'cat' ? hex(COLORS.coast) : '#dce5e5');
+    if (it.kind === 'cat') drawLabelSlab(g, it.x - 47, it.y - 11, 94, 22, C_p1, it.on);
+    if (it.kind === 'act') drawLabelSlab(g, it.x - (it.on ? 59 : 52), it.y - 10, it.on ? 118 : 104, 20, C_p1, it.on);
+    t.setColor(it.on || it.kind === 'clash' ? '#ffffff' : it.kind === 'key' ? '#ff9ab1' : it.off ? '#53616a' : it.kind === 'cat' ? hex(C_coast) : '#dce5e5');
     t.setPosition(it.x, it.y);
     setT(t, it.label);
   });
@@ -2295,7 +2295,7 @@ function drawHud(s, time) {
   if (play && phase) {
     g.fillStyle(0x03080e, 0.9);
     g.fillPoints([{ x: 0, y: 530 }, { x: 145, y: 530 }, { x: 165, y: 538 }, { x: 635, y: 538 }, { x: 655, y: 530 }, { x: W, y: 530 }, { x: W, y: H }, { x: 0, y: H }], true);
-    g.lineStyle(2, s.phase === 'clash' ? COLORS.cpu : COLORS.p1, 0.75);
+    g.lineStyle(2, s.phase === 'clash' ? C_cpu : C_p1, 0.75);
     g.lineBetween(145, 530, 655, 530);
   }
   if (play && ['choose', 'aim', 'clash', 'throw'].includes(s.phase)) {
@@ -2303,7 +2303,7 @@ function drawHud(s, time) {
     const left = Math.max(0, s.deadline - time) / total;
     const barW = 430;
     const barX = W / 2 - barW / 2;
-    const barColor = left > 0.5 ? COLORS.p1 : left > 0.25 ? COLORS.bolt : COLORS.cpu;
+    const barColor = left > 0.5 ? C_p1 : left > 0.25 ? C_bolt : C_cpu;
     g.fillStyle(0x17232c, 1);
     g.fillRect(barX, H - 11, barW, 5);
     g.fillStyle(barColor, 1);
@@ -2313,7 +2313,7 @@ function drawHud(s, time) {
   // Attract/game-over title treatment: one decisive plate, no generic modal stack.
   let title = '';
   let sub = '';
-  let titleColor = COLORS.p1;
+  let titleColor = C_p1;
   const blinkOn = Math.floor(time / 450) % 2 === 0;
   if (!play) {
     const card = CARDS[Math.floor((time - s.attractStart) / CARD_MS) % CARDS.length];
@@ -2322,7 +2322,7 @@ function drawHud(s, time) {
   } else if (s.phase === 'over') {
     const o = s.state.over;
     title = o === 'p1' ? 'VICTORY' : o === 'cpu' ? 'DEFEATED' : 'DRAW';
-    titleColor = o === 'p1' ? COLORS.p1 : o === 'cpu' ? COLORS.cpu : COLORS.bolt;
+    titleColor = o === 'p1' ? C_p1 : o === 'cpu' ? C_cpu : C_bolt;
     sub = time > s.phaseStart + ATTRACT_OVER_MS && blinkOn ? 'PRESS START' : ' ';
   }
   if (title) {
@@ -2337,3 +2337,4 @@ function drawHud(s, time) {
   setT(ui.title, title);
   setT(ui.sub, title ? sub : '');
 }
+})();
