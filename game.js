@@ -1293,7 +1293,7 @@ const drawCell = (g, x, y, color, fillAlpha, lineAlpha) => {
   g.sP(pts, true);
 };
 
-// Shared 18-piece volumetric model: x=lateral, y=height, z=front.
+// Shared 28-piece volumetric model: x=lateral, y=height, z=front.
 // Piece = centre xyz, width/height/depth, top x/z scale, material.
 // Temjin-like silhouette: big angular shoulders, slim waist, white limbs, heavy boots, V antennae.
 // Materials: 0 dark joint, 1 team armour, 2 white, 3 energy, 4 orange trim.
@@ -1312,6 +1312,8 @@ const MECH_MODEL = [
   [-25, 57, 0, 5, 8, 11, 0.4, 0.6, 4], [25, 57, 0, 5, 8, 11, 0.4, 0.6, 4],
   [-2.5, 76, 0, 1.5, 10, 1.5, 0.3, 0.3, 2], [2.5, 76, 0, 1.5, 10, 1.5, 0.3, 0.3, 2],
   [-5, 30, 4.2, 3, 4, 1, 1, 1, 3], [5, 30, 4.2, 3, 4, 1, 1, 1, 3],
+  [-17, 30, 3, 6, 5, 6, 0.9, 0.9, 0], [17, 30, 3, 6, 5, 6, 0.9, 0.9, 0],
+  [-6, 2.5, 15, 10, 5, 6, 0.5, 0.2, 1], [6, 2.5, 15, 10, 5, 6, 0.5, 0.2, 1],
 ];
 const MECH_FACES = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]];
 const MECH_PALS = [[0x1d3a42, 0x3046d0, 0xe4eaec, 0x3dff9c, 0xff8a1e], [0x1d3a3a, 0xd8232f, 0xe4eaec, 0x3dff9c, 0xff8a1e]];
@@ -1339,7 +1341,7 @@ const drawMecha = (g, gx, gy, fc, color, alpha, flash, stance, pose = 'idle', fr
     : null;
   const part = (i, x, y, z) => {
     if (pose === 'move') {
-      const leg = i < 6 || i > 21, arm = (i > 11 && i < 16) || i === 17;
+      const leg = i < 6 || i === 22 || i === 23 || i > 25, arm = (i > 11 && i < 16) || i === 17 || i === 24 || i === 25;
       const pivot = leg ? 40 : arm ? 57 : 40;
       const a = leg ? [0.16, 0.42, 0.2][frame] + (i & 1) * 0.04 : arm ? 0.52 : [0.12, 0.3, 0.16][frame];
       const yy = y - pivot, si = M_sin(a), cs = M_cos(a);
@@ -1350,8 +1352,8 @@ const drawMecha = (g, gx, gy, fc, color, alpha, flash, stance, pose = 'idle', fr
       x = a[0] + (b[0] - a[0]) * t + ox * 0.4;
       y = a[1] + (b[1] - a[1]) * t + oy;
       z = a[2] + (b[2] - a[2]) * t + ox * 0.2;
-    } else if (blade && (i === 11 || i === 13 || i === 15 || i === 19)) {
-      const q = ((i === 19 ? 11 : i) - 9) / 6; // the orange shoulder tip follows its shoulder
+    } else if (blade && (i === 11 || i === 13 || i === 15 || i === 19 || i === 25)) {
+      const q = ((i === 19 ? 11 : i === 25 ? 15 : i) - 9) / 6; // tip and fist follow their arm
       const a = (pose === 'hslash' ? [[5, -2, -12], [-12, 1, 10], [-20, -4, -6]] : [[-2, 14, -2], [-4, 2, 10], [-5, -6, 12]])[frame];
       x += a[0] * q; y += a[1] * q; z += a[2] * q;
     }
@@ -1627,6 +1629,7 @@ const MENU_TITLES = ['MOVEMENT', 'COMBAT'];
 
 // Dynamic menu: adds a BURST row to COMBAT when the unit is KNOCKBACK with a charge left.
 const buildMenu = (u) => {
+  if (!canAct(u)) return [['burst'], ['burst']];
   const combat = [...COMBAT_ACTS];
   if (canUse(u, 'burst')) combat.push('burst');
   return [MOVE_ACTS, combat];
@@ -2215,6 +2218,8 @@ const playEvents = async (s, events, token) => {
       await wait(s, 300);
     } else if (e.t === 'guard') {
       addFx(s, { kd: 'guard', who: e.who, dur: 4000 });
+      u.pose = 'hslash';
+      u.frame = 0;
       s.sfx.blip();
       await wait(s, 250);
     } else if (STRIKE_ACTS.includes(e.t) || e.t === 'grab') {
@@ -2429,7 +2434,8 @@ const drawWorld = (s, time, delta) => {
     if (i === 0 && ghost) drawMecha(gu, ghost.x, ghost.y, ghost.fc, C_p1, 0.35, 0, 0, 'idle', 0);
     const pl = s.ph === 'aim' ? s.sel : s.ph === 'locked' && s.p1Plan;
     const guard = !i && play && pl && STRIKE_ACTS.includes(pl.act) && (pl.act === 'hslash' ? 'hslash' : 'vslash');
-    drawMecha(gu, v.gx, v.gy, guard ? pl.dir : v.fc, unitColor(i), 1, v.flash, v.st, guard || v.pose, guard ? 0 : v.frame);
+    const stance = guard || (s.ph === 'clash' && 'vslash');
+    drawMecha(gu, v.gx, v.gy, guard ? pl.dir : v.fc, unitColor(i), 1, v.flash, v.st, stance || v.pose, stance ? 0 : v.frame);
     const p = toIso(v.gx, v.gy);
     const n = s.vw[1 - i];
     const near = M_abs(v.gx - n.gx) + M_abs(v.gy - n.gy) < 3;
@@ -2570,8 +2576,10 @@ const drawHud = (s, time) => {
     g.fC(cx, cy, 104);
     arc(cx, cy, 104, 0, 7, C_p1, 1.5, 0.3);
     arc(cx, cy, 116, side > 0 ? -1.2 : 1.6, side > 0 ? 1.55 : 4.35, C_p1, 4, 0.55);
-    items.push({ kd: 'cat', x: cx - 78, y: cy - 128, label: MENU_TITLES[0], on: s.mp.col === 0 });
-    items.push({ kd: 'cat', x: cx + 78, y: cy - 128, label: MENU_TITLES[1], on: s.mp.col === 1 });
+    if (canAct(us[0])) {
+      items.push({ kd: 'cat', x: cx - 78, y: cy - 128, label: MENU_TITLES[0], on: s.mp.col === 0 });
+      items.push({ kd: 'cat', x: cx + 78, y: cy - 128, label: MENU_TITLES[1], on: s.mp.col === 1 });
+    }
     const stepA = M_min(0.42, 2.5 / col.length);
     col.forEach((act, ri) => {
       const a = 0.25 + (ri - (col.length - 1) / 2) * stepA;
