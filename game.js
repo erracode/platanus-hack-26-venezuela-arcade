@@ -235,7 +235,7 @@ const ACTIONS = {
   move: { name: 'MOVE', spd: 160, target: 'tile', range: 3, info: ['FORWARD 3 // SIDE 2 // BACK 1', 'FURTHER = SLOWER  FWD 3 = MOMENTUM'] },
   dodge: { name: 'DODGE', spd: 215, target: 'tile', range: 1, info: ['HOP 1 TILE, KEEP FACING', 'VERY FAST: ESCAPE AN ATTACK'] },
   tele: { name: 'TELEPORT', spd: 215, target: 'tile', range: 3, info: ['BLINK UP TO 3 TILES, ANY ANGLE', '1 CHARGE  INTO AN ATTACK = LAUNCHED'] },
-  pivot: { name: 'PIVOT', spd: 215, target: 'dir', info: ['TURN TO FACE ANOTHER SIDE', 'TURNING INSIDE AN ATTACK COSTS 60/90°'] },
+  pivot: { name: 'PIVOT', spd: 215, target: 'dir', info: ['TURN TO FACE ANOTHER SIDE', 'ATTACKS LOSE 60 SPD PER TURN'] },
   vslash: { name: 'V-SLASH', spd: 150, target: 'dir', strike: true, info: ['3 TILES FORWARD: 22 DMG', 'X2 ON FLANK'] },
   hslash: { name: 'H-SLASH', spd: 150, target: 'dir', strike: true, info: ['WIDE SWEEP 3X2: 22 DMG', 'X2 ON FLANK  REACHES DIAGONALS'] },
   jab: { name: 'JAB', spd: 176, target: 'dir', strike: true, info: ['QUICK POKE: 8 DMG', 'NO COMBO  STOPS SLOWER ACTIONS'] },
@@ -1034,8 +1034,7 @@ const drawSlab = (g) => {
     const p = cellPts(x, ROWS - 1);
     edges.push([p[EDGE.S[0]], p[EDGE.S[1]]]);
   }
-  for (let k = 0; k < edges.length; k++) {
-    const [a, b] = edges[k];
+  for (const [a, b] of edges) {
     const quad = [a, b, { x: b.x, y: b.y + SLAB_H }, { x: a.x, y: a.y + SLAB_H }];
     g.fS(a.x < b.x ? 0x102b25 : 0x081a1d, 1);
     g.fP(quad, true);
@@ -1043,12 +1042,6 @@ const drawSlab = (g) => {
     g.sP(quad, true);
     g.lS(1, 0x376153, 0.42);
     g.lB(a.x, a.y + 4, b.x, b.y + 4);
-    if (k % 3 === 0) {
-      const x = (a.x + b.x) / 2;
-      const y = (a.y + b.y) / 2 + 9;
-      g.fS(0x668071, 0.55);
-      g.fC(x, y, 1.2);
-    }
   }
 };
 
@@ -1222,23 +1215,12 @@ const drawBridge = (g) => {
   }
 };
 
-const drawCatatumboLandmark = (g) => {
-  const c = toIso(4, 16);
-  g.fS(0x172235, 0.82);
-  g.fC(c.x - 9, c.y - 22, 9);
-  g.fC(c.x + 3, c.y - 27, 12);
-  g.fC(c.x + 15, c.y - 21, 8);
-  g.fS(0x263a50, 0.65);
-  g.fillEllipse(c.x + 2, c.y - 19, 40, 13);
-};
-
 // Static layer: drawn once.
 const drawMap = (g) => {
   drawSlab(g);
   drawTiles(g);
   drawShore(g);
   drawBridge(g);
-  drawCatatumboLandmark(g);
   const huts = [];
   for (let y = 0; y < ROWS; y++) {
     for (let x = 0; x < COLS; x++) if (tileAt(x, y) === 3) huts.push({ x, y });
@@ -1684,8 +1666,7 @@ const createUi = (scene) => {
 const setupCameras = (s) => {
   const main = s.cameras.main;
   s.camFocus = { x: WORLD_W / 2, y: ISO_OY };
-  s.hudCam = s.cameras.add ? s.cameras.add(0, 0, W, H) : { ignore() {} };
-  if (!s.cameras.add) return;
+  s.hudCam = s.cameras.add(0, 0, W, H);
   main.setBounds(0, 0, WORLD_W, WORLD_H).setDeadzone(64, 44).startFollow(s.camFocus, false, 0.09, 0.09);
   const fixed = Object.values(s.ui).flat().filter((o) => !s.ui.tags.includes(o));
   main.ignore([s.gUi, s.gWire, ...fixed]);
@@ -1694,7 +1675,6 @@ const setupCameras = (s) => {
 
 const updateCamera = (s, snap) => {
   const cam = s.cameras.main;
-  if (!cam.setZoom) return;
   let p, zoom;
   if (s.mode === 'attract' || s.ph === 'clash') {
     p = toIso((s.vw[0].gx + s.vw[1].gx) / 2, (s.vw[0].gy + s.vw[1].gy) / 2);
@@ -1714,7 +1694,7 @@ const updateCamera = (s, snap) => {
 
 const screenPoint = (s, p) => {
   const c = s.cameras.main;
-  return c.worldView ? { x: (p.x - c.worldView.x) * c.zoom, y: (p.y - c.worldView.y) * c.zoom } : p;
+  return { x: (p.x - c.worldView.x) * c.zoom, y: (p.y - c.worldView.y) * c.zoom };
 };
 
 function create() {
@@ -1776,7 +1756,7 @@ const trackDelay = (s, ms, fn, onCancel) => {
   entry.cancel = () => {
     if (entry.done) return;
     entry.done = true;
-    if (entry.ev && entry.ev.remove) entry.ev.remove(false);
+    entry.ev.remove(false);
     remove();
     if (onCancel) onCancel();
   };
@@ -1790,9 +1770,8 @@ const wait = (s, ms) => {
 };
 
 const clearAsync = (s) => {
-  (s.oTi || []).slice().forEach((e) => e.cancel());
-  (s.oTw || []).slice().forEach((e) => e.cancel());
-  (s.flt || []).slice().forEach((t) => t.destroy && t.destroy());
+  [...s.oTi, ...s.oTw].forEach((e) => e.cancel());
+  s.flt.forEach((t) => t.destroy());
   s.oTi = [];
   s.oTw = [];
   s.flt = [];
@@ -2113,7 +2092,7 @@ const tweenTo = (s, o, x, y, ms) => {
       res();
     };
     entry.cancel = () => {
-      if (entry.tw && entry.tw.stop) entry.tw.stop();
+      entry.tw.stop();
       finish();
     };
     entry.tw = s.tweens.add({ targets: o, gx: x, gy: y, duration: ms, ease: 'Sine.easeInOut', onComplete: finish });
@@ -2124,6 +2103,12 @@ const tweenTo = (s, o, x, y, ms) => {
 const addFx = (s, fx) => {
   fx.until = s.time.now + fx.dur;
   s.fx.push(fx);
+};
+
+// Iso shockwave ring at a unit (r = start radius; it eases out to twice that while fading).
+const ring = (s, o, color, r, dur) => {
+  const p = toIso(o.gx, o.gy);
+  addFx(s, { kd: 'ring', x: p.x, y: p.y - 26, color, r, dur });
 };
 
 const floatText = (s, o, str, color, size = 15, life = 1000) => {
@@ -2152,7 +2137,7 @@ const floatText = (s, o, str, color, size = 15, life = 1000) => {
     t.destroy();
   };
   entry.cancel = () => {
-    if (entry.tw && entry.tw.stop) entry.tw.stop();
+    entry.tw.stop();
     finish();
   };
   entry.tw = s.tweens.add({ targets: t, y: t.y - 26, alpha: 0, delay: life * 0.4, duration: life * 0.6, onComplete: finish });
@@ -2251,12 +2236,15 @@ const playEvents = async (s, events, token) => {
       // Combo bonus: if the target was in a non-normal stance, shout it.
       const targetSt = e.prevSt || ST_NORMAL;
       if (targetSt > ST_NORMAL && e.combo !== false) floatText(s, u, 'COMBO!', C_bolt, 14);
-      shake(140, 0.008);
+      const ko = !s.dH[e.who];
+      ring(s, u, ko ? C_white : unitColor(e.who), ko ? 40 : 18, ko ? 900 : 320);
+      shake(ko ? 600 : 140, ko ? 0.02 : 0.008);
       s.sfx.hit();
-      await wait(s, HIT_PAUSE_MS);
+      await wait(s, ko ? HIT_PAUSE_MS * 2 : HIT_PAUSE_MS);
     } else if (e.t === 'parry') {
       floatText(s, u, 'PARRY! +' + GUTS_BONUS, C_coast, 17);
       addFx(s, { kd: 'flash', dur: 120 });
+      ring(s, u, C_p1, 22, 380);
       s.sfx.parry();
       await wait(s, HIT_PAUSE_MS);
     } else if (e.t === 'interrupt') {
@@ -2303,6 +2291,7 @@ const playEvents = async (s, events, token) => {
       u.st = ST_NORMAL;
       floatText(s, u, 'BURST!', C_bolt, 17);
       addFx(s, { kd: 'flash', dur: 120 });
+      ring(s, u, C_bolt, 34, 520);
       s.sfx.clash();
       await wait(s, 300);
     } else if (e.t === 'stance') {
@@ -2337,6 +2326,9 @@ const playEvents = async (s, events, token) => {
       const m = toIso((v[0].gx + v[1].gx) / 2, (v[0].gy + v[1].gy) / 2);
       addFx(s, { kd: 'bolt', pts: makeBoltPoints(m.x, m.y - 24), dur: 550 });
       addFx(s, { kd: 'shards', x: m.x, y: m.y - 24, color: C_cpu, dur: 520 });
+      const mid = { gx: (v[0].gx + v[1].gx) / 2, gy: (v[0].gy + v[1].gy) / 2 };
+      ring(s, mid, C_white, 30, 520);
+      ring(s, mid, C_cpu, 16, 420);
       addFx(s, { kd: 'flash', dur: 180 });
       shake(220, 0.012);
       s.sfx.clash();
@@ -2466,6 +2458,12 @@ const drawWorld = (s, time, delta) => {
     else if (f.kd === 'sweep') drawSweep(gt, s.vw[f.who].gx, s.vw[f.who].gy, s.vw[f.who].fc, unitColor(f.who), a, f.act);
     else if (f.kd === 'guard') drawGuard(gt, s.vw[f.who].gx, s.vw[f.who].gy, s.vw[f.who].fc, a);
     else if (f.kd === 'shards') drawShards(gt, f.x, f.y, f.color, a);
+    else if (f.kd === 'ring') {
+      const q = (f.until - time) / f.dur; // continuous over the whole ring life
+      const k = f.r * (2 - q * q);
+      gt.lS(1 + 5 * q, f.color, q);
+      gt.strokeEllipse(f.x, f.y, k * 2, k);
+    }
     else if (f.kd === 'flash') {
       gt.fS(f.color || C_white, 0.35 * a);
       gt.fR(0, 0, W, H);
@@ -2532,7 +2530,7 @@ const drawHud = (s, time) => {
     const available = (canAct(me) || s.sel.act === 'burst') && canUse(me, s.sel.act);
     info = available
       ? [a.name + '  //  SPD ' + speedOf(me, plan), a.info[0], a.info[1]]
-      : [a.name + '  //  LOCKED', canAct(me) ? 'NEEDS MOMENTUM' : 'ONLY BURST BREAKS KNOCKBACK', canAct(me) ? 'MOVE FORWARD 3 TILES THE TURN BEFORE' : 'NO CHARGE: FILL GUTS TO REFRESH'];
+      : [a.name + '  //  LOCKED', canAct(me) ? 'NEEDS MOMENTUM' : 'ONLY BURST BREAKS KNOCKBACK', canAct(me) ? 'MOVE FORWARD 3 FIRST' : 'NO CHARGE: FILL GUTS TO REFRESH'];
     drawLabelSlab(g, 244, 9, 312, 56, C_p1, false);
   }
   info.forEach((t, k) => setT(ui.info[k], t));
@@ -2542,7 +2540,7 @@ const drawHud = (s, time) => {
   let hint = '';
   if (play && aiming && s.ph === 'choose') {
     ph = 'TURN ' + s.state.turn + '  //  PICK AN ACTION';
-    hint = 'LEFT/RIGHT CATEGORY   UP/DOWN ACTION   B1 SELECT';
+    hint = 'L/R TYPE   U/D ACTION   B1 SELECT';
   } else if (play && aiming) {
     ph = 'AIM // ' + ACTIONS[s.sel.act].name;
     hint = 'STICK AIM   B1 CONFIRM   B2 BACK';
@@ -2551,13 +2549,13 @@ const drawHud = (s, time) => {
     hint = 'CANNOT ACT THIS TURN';
   } else if (play && s.ph === 'locked') {
     ph = 'COMMAND LOCKED';
-    hint = time > s.cRdy ? 'BOTH PILOTS READY' : 'ENEMY COMMAND ENCRYPTED...';
+    hint = time > s.cRdy ? 'BOTH PILOTS READY' : 'ENEMY ENCRYPTED...';
   } else if (play && s.ph === 'clash') {
     ph = 'SWORD CLASH // PICK FAST';
     hint = 'PARRY > THRUST > FEINT > PARRY   BURST BEATS THRUST + FEINT';
   } else if (play && s.ph === 'throw') {
     ph = 'TARGET CAPTURED // THROW';
-    hint = 'STICK AIM   B1 THROW   SMASH HUTS, THE BRIDGE OR THE EDGE';
+    hint = 'STICK AIM   B1 THROW   SMASH HUTS / BRIDGE';
   } else if (s.ph === 'resolve') ph = s.banner;
   setT(ui.ph, play ? ph : '');
   setT(ui.hint, hint);
