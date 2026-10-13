@@ -60,6 +60,7 @@ const LUNGE_DMG = 18;
 const JAB_DMG = 8; // quick poke: never advances stance
 const LUNGE_FLANK = 2; // lunge damage multiplier when hitting a side or the back
 const LUNGE_DASH = 2;
+const TP_RANGE = 5; // teleport reach (Manhattan tiles)
 const GRAB_DMG = 10;
 const THROW_DMG = 15;
 const SLAM_DMG = 10; // extra when the throw hits land / the edge
@@ -234,16 +235,16 @@ const consumePressed = (controls, code) => {
 const ACTIONS = {
   move: { name: 'MOVE', spd: 160, target: 'tile', range: 3, info: ['FORWARD 3 // SIDE 2 // BACK 1', 'FURTHER = SLOWER  FWD 3 = MOMENTUM'] },
   dodge: { name: 'DODGE', spd: 215, target: 'tile', range: 1, info: ['HOP 1 TILE, KEEP FACING', 'VERY FAST: ESCAPE AN ATTACK'] },
-  tele: { name: 'TELEPORT', spd: 215, target: 'tile', range: 3, info: ['BLINK UP TO 3 TILES, ANY ANGLE', '1 CHARGE  INTO AN ATTACK = LAUNCHED'] },
+  tele: { name: 'TELEPORT', spd: 215, target: 'tile', range: 3, info: ['BLINK UP TO 5 TILES, ANY ANGLE', '1 CHARGE  INTO AN ATTACK = LAUNCHED'] },
   pivot: { name: 'PIVOT', spd: 215, target: 'dir', info: ['TURN TO FACE ANOTHER SIDE', 'ATTACKS LOSE 60 SPD PER TURN'] },
   vslash: { name: 'V-SLASH', spd: 150, target: 'dir', strike: true, info: ['3 TILES FORWARD: 22 DMG', 'X2 ON FLANK'] },
   hslash: { name: 'H-SLASH', spd: 150, target: 'dir', strike: true, info: ['WIDE SWEEP 3X2: 22 DMG', 'X2 ON FLANK  REACHES DIAGONALS'] },
   jab: { name: 'JAB', spd: 176, target: 'dir', strike: true, info: ['QUICK POKE: 8 DMG', 'NO COMBO  STOPS SLOWER ACTIONS'] },
-  lunge: { name: 'LUNGE', spd: 210, target: 'dir', strike: true, info: ['DASH 2 TILES + STAB: 18 DMG', 'X2 ON FLANK  NEEDS MOMENTUM'] },
+  lunge: { name: 'LUNGE', spd: 210, target: 'dir', strike: true, info: ['CHARGE 3 TILES, HITS THE LANE: 18', 'X2 ON FLANK  NEEDS MOMENTUM'] },
   parry: { name: 'PARRY', spd: 215, target: 'dir', info: ['BLOCKS STRIKES FROM THE FRONT', 'WHIFF = OPEN NEXT TURN'] },
   grab: { name: 'GRAB', spd: 180, target: 'dir', info: ['CATCH + THROW: 25+ DMG', 'IGNORES PARRY  WHIFF = OPEN'] },
   burst: { name: 'BURST', spd: 210, target: 'none', info: ['ESCAPE KNOCKBACK: PUSH + OVERDRIVE', '1 CHARGE // REFILLS ON FULL GUTS'] },
-  wait: { name: 'WAIT', spd: 0, target: 'none', info: [] },
+  wait: { name: 'PASS', spd: 0, target: 'none', info: ['DO NOTHING', ''] },
 };
 const MOVE_ACTS = ['move', 'dodge', 'tele', 'pivot'];
 const COMBAT_ACTS = ['vslash', 'hslash', 'jab', 'lunge', 'parry', 'grab'];
@@ -346,11 +347,11 @@ const reach = (s, i, range) => {
 const tpReach = (s, i) => {
   const me = s.us[i];
   const out = new Map();
-  for (let dy = -3; dy <= 3; dy++) {
-    for (let dx = -3; dx <= 3; dx++) {
+  for (let dy = -TP_RANGE; dy <= TP_RANGE; dy++) {
+    for (let dx = -TP_RANGE; dx <= TP_RANGE; dx++) {
       const t = { x: me.x + dx, y: me.y + dy };
       const d = dist(t, me);
-      if (d && d <= 3 && isWalkable(t.x, t.y) && !same(t, s.us[1 - i])) out.set(t.x + ',' + t.y, [t]);
+      if (d && d <= TP_RANGE && isWalkable(t.x, t.y) && !same(t, s.us[1 - i])) out.set(t.x + ',' + t.y, [t]);
     }
   }
   return out;
@@ -600,7 +601,7 @@ const resolveTurn = (state, plans) => {
       if (a === 'tele') {
         const t = (p[i].wp || [])[0];
         U[i].tp = 0;
-        walk[i] = t && dist(t, U[i]) <= 3 && isWalkable(t.x, t.y) && !same(t, U[1 - i]) ? [t] : [];
+        walk[i] = t && dist(t, U[i]) <= TP_RANGE && isWalkable(t.x, t.y) && !same(t, U[1 - i]) ? [t] : [];
         continue;
       }
       if (ACTIONS[a].target !== 'tile') continue;
@@ -1471,30 +1472,21 @@ const frontEdge = (gx, gy, fc, at) => {
   ];
 };
 
+// Z-saber style crescent: a vertical arc for V-SLASH, a wide horizontal arc for H-SLASH.
 const drawSweep = (g, gx, gy, fc, color, a, kd) => {
-  const c = toIso(gx, gy), v = dirVec(fc);
-  let arc;
-  if (kd === 'hslash') {
-    const side = dirVec(fc === 'N' || fc === 'S' ? 'E' : 'N');
-    arc = [
-      { x: c.x + v.x * 0.9 + side.x * 1.55, y: c.y + v.y * 0.9 + side.y * 1.55 - 20 },
-      { x: c.x + v.x * 1.8, y: c.y + v.y * 1.8 - 27 },
-      { x: c.x + v.x * 0.9 - side.x * 1.55, y: c.y + v.y * 0.9 - side.y * 1.55 - 20 },
-    ];
-  } else arc = [
-    { x: c.x + v.x * 0.25, y: c.y + v.y * 0.25 - 42 },
-    { x: c.x + v.x * 1.55, y: c.y + v.y * 1.55 - 26 },
-    { x: c.x + v.x * 3, y: c.y + v.y * 3 - 10 },
-  ];
-  g.lS(12, C_ink, 0.72 * a);
-  g.sP(arc, false);
-  g.lS(7, color, 0.7 * a);
-  g.sP(arc, false);
-  g.lS(2.5, C_white, a);
-  g.sP(arc, false);
-  const q = arc[2];
+  const c = toIso(gx, gy), v = dirVec(fc), sd = dirVec(fc === 'N' || fc === 'S' ? 'E' : 'N');
+  const h = kd === 'hslash';
+  const at = (k, w) => {
+    const t = k / 10, th = h ? -1.7 + t * 3.4 : -0.5 + t * 3.1, r = 1 - w * M_sin(t * 3.14);
+    return h
+      ? { x: c.x + (v.x * M_cos(th) + sd.x * M_sin(th)) * r * 1.6, y: c.y - 30 + (v.y * M_cos(th) + sd.y * M_sin(th)) * r * 1.6 }
+      : { x: c.x + v.x * M_sin(th) * r * 1.5, y: c.y - 30 + v.y * M_sin(th) * r * 1.5 - M_cos(th) * r * 42 };
+  };
+  const band = (w) => [...Array(11).keys()].map((k) => at(k, 0)).concat([...Array(11).keys()].reverse().map((k) => at(k, w)));
+  g.fS(color, 0.55 * a);
+  g.fP(band(0.5), true);
   g.fS(C_white, a);
-  g.fillTriangle(q.x, q.y, q.x - 7, q.y - 5, q.x - 2, q.y + 6);
+  g.fP(band(0.2), true);
 };
 
 const drawGuard = (g, gx, gy, fc, a) => {
@@ -1611,7 +1603,7 @@ const MENU_TITLES = ['MOVEMENT', 'COMBAT'];
 
 // Dynamic menu: adds a BURST row to COMBAT when the unit is KNOCKBACK with a charge left.
 const buildMenu = (u) => {
-  if (!canAct(u)) return [['burst'], ['burst']];
+  if (!canAct(u)) return [['burst', 'wait'], ['burst', 'wait']];
   const combat = [...COMBAT_ACTS];
   if (canUse(u, 'burst')) combat.push('burst');
   return [MOVE_ACTS, combat];
@@ -1845,15 +1837,9 @@ const lockP1 = (s, plan) => {
 const startAim = (s) => {
   const me = s.state.us[0];
   const a = ACTIONS[s.sel.act];
-  if (!a || (!canAct(me) && s.sel.act !== 'burst') || !canUse(me, s.sel.act)) return s.sfx.tick();
-  // BURST / WAIT have no aim step — lock immediately.
-  if (a.target === 'none') {
-    if (s.sel.act === 'burst') {
-      lockP1(s, { act: 'burst' });
-      return;
-    }
-    return s.sfx.tick();
-  }
+  if (!a || (!canAct(me) && a.target !== 'none') || !canUse(me, s.sel.act)) return s.sfx.tick();
+  // BURST / PASS have no aim step — lock immediately.
+  if (a.target === 'none') return lockP1(s, { act: s.sel.act });
   s.sel.dir = me.fc;
   s.sel.cur = null;
   if (a.target === 'tile') {
@@ -2455,7 +2441,7 @@ const drawWorld = (s, time, delta) => {
     const a = M_min(1, (f.until - time) / M_min(f.dur, 400));
     if (f.kd === 'bolt') drawBolt(gt, { pts: f.pts, until: f.until, now: time, dur: f.dur });
     else if (f.kd === 'cell') drawCell(gt, f.x, f.y, f.color, 0.4 * a, a);
-    else if (f.kd === 'sweep') drawSweep(gt, s.vw[f.who].gx, s.vw[f.who].gy, s.vw[f.who].fc, unitColor(f.who), a, f.act);
+    else if (f.kd === 'sweep') drawSweep(gt, s.vw[f.who].gx, s.vw[f.who].gy, s.vw[f.who].fc, 0x3dff9c, a, f.act);
     else if (f.kd === 'guard') drawGuard(gt, s.vw[f.who].gx, s.vw[f.who].gy, s.vw[f.who].fc, a);
     else if (f.kd === 'shards') drawShards(gt, f.x, f.y, f.color, a);
     else if (f.kd === 'ring') {
@@ -2527,7 +2513,7 @@ const drawHud = (s, time) => {
   if (aiming) {
     const a = ACTIONS[s.sel.act];
     const plan = selPlan(s) || { act: s.sel.act, dir: me.fc };
-    const available = (canAct(me) || s.sel.act === 'burst') && canUse(me, s.sel.act);
+    const available = (canAct(me) || a.target === 'none') && canUse(me, s.sel.act);
     info = available
       ? [a.name + '  //  SPD ' + speedOf(me, plan), a.info[0], a.info[1]]
       : [a.name + '  //  LOCKED', canAct(me) ? 'NEEDS MOMENTUM' : 'ONLY BURST BREAKS KNOCKBACK', canAct(me) ? 'MOVE FORWARD 3 FIRST' : 'NO CHARGE: FILL GUTS TO REFRESH'];
