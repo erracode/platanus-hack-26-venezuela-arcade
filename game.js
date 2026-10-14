@@ -495,7 +495,7 @@ const resolveTurn = (state, plans) => {
     }
   });
   const turnSt = U.map((u) => u.st);
-  const recovering = enteredSt.map((st) => st !== ST_NORMAL);
+  const recovering = enteredSt.map((st) => st !== ST_NORMAL && st !== ST_DOWN);
   const p = plans.map((plan, i) => {
     plan = plan || WAIT_PLAN;
     const burstEscape = plan.act === 'burst' && canUse(U[i], 'burst');
@@ -523,6 +523,7 @@ const resolveTurn = (state, plans) => {
       });
       events.push({ t: 'clash' });
       U.forEach((u, i) => (u.momentum = momentum[i]));
+      s.rec = U.map((u, i) => (recovering[i] ? u.st : -1));
       return { state: s, events, clash: true };
     }
   }
@@ -536,7 +537,7 @@ const resolveTurn = (state, plans) => {
   const parried = [false, false];
   const blinked = [false, false]; // teleported this turn: an incoming strike launches it
   let launched = -1;
-  const inv = [false, false]; // bursting units cannot be hit this step
+  const inv = [false, false]; // bursting units cannot be hit for the whole turn (reference rule)
   const hurt = [false, false];
   const strike = (i, dmg, flankMult, combo = true, from = U[i]) => {
     const foe = U[1 - i];
@@ -631,6 +632,7 @@ const resolveTurn = (state, plans) => {
       events.push({ t: 'move', who: i, wp, fc: U[i].fc, act: p[i].act });
     }
 
+    acting.forEach((i) => p[i].act === 'burst' && (inv[i] = true));
     for (const i of acting) {
       if (p[i].act === 'parry' || p[i].act === 'block') {
         guard[i] = p[i].act === 'parry' ? 1 : 2;
@@ -653,11 +655,12 @@ const resolveTurn = (state, plans) => {
       }
       // Shockwave (BURST hurts, VENT only shoves): an adjacent foe is pushed away and loses its action.
       const reachS = p[i].act === 'vent' ? 2 : p[i].act === 'burst' ? 1 : 0;
-      if (M_abs(foe.x - me.x) <= reachS && M_abs(foe.y - me.y) <= reachS) {
+      if (!inv[1 - i] && M_abs(foe.x - me.x) <= reachS && M_abs(foe.y - me.y) <= reachS) {
         if (p[i].act === 'burst') {
           foe.hp = M_max(0, foe.hp - BURST_DMG);
           hurt[1 - i] = true;
           events.push({ t: 'hit', who: 1 - i, dmg: BURST_DMG, combo: false });
+          gainGuts(me, BURST_DMG, events, i);
         }
         const to = { x: foe.x + M_sign(foe.x - me.x), y: foe.y + M_sign(foe.y - me.y) };
         if (isWalkable(to.x, to.y)) {
@@ -874,6 +877,14 @@ const resolveClash = (state, picks) => {
       }
     }
   }
+  // Stances carried into the clash recover unless the clash itself advanced them.
+  s.us.forEach((u, i) => {
+    if (u.st === (s.rec || [])[i]) {
+      u.st = ST_NORMAL;
+      events.push({ t: 'stance', who: i, st: ST_NORMAL });
+    }
+  });
+  delete s.rec;
   finishTurn(s);
   return { state: s, events };
 };
@@ -1221,23 +1232,6 @@ const dirVec = (dir) => {
   return { x: ((d.dx + d.dy) * TW) / 2, y: ((d.dy - d.dx) * TH) / 2 };
 };
 
-// Screen-space arrow showing which stick direction reaches a neighbour cell.
-const STICK_ARROW = { U: [0, -1], R: [1, 0], D: [0, 1], L: [-1, 0] };
-
-const drawArrow = (g, cx, cy, stick, color) => {
-  const [ax, ay] = STICK_ARROW[stick];
-  const s = 5;
-  g.fS(color, 0.9);
-  g.fillTriangle(
-    cx + ax * s,
-    cy + ay * s,
-    cx - ax * s + ay * s,
-    cy - ay * s - ax * s,
-    cx - ax * s - ay * s,
-    cy - ay * s + ax * s,
-  );
-};
-
 const drawCell = (g, x, y, color, fillAlpha, lineAlpha) => {
   const pts = cellPts(x, y);
   g.fS(color, fillAlpha);
@@ -1553,6 +1547,7 @@ const createAudio = (scene) => {
       tone(90, 0.4, 'sawtooth', 0.08, 40);
     },
     win: () => arp([523, 659, 784, 1047]),
+    start: () => arp([392, 587, 784, 1175]),
     lose: () => arp([392, 311, 233, 175]),
   };
 };
@@ -1851,7 +1846,10 @@ const handleInput = (s, time) => {
   const start = () => consumePressed(c, 'START1') || consumePressed(c, 'P1_1');
 
   if (s.mode === 'attract') {
-    if (start()) return resetMatch(s, 'play');
+    if (start()) {
+      resetMatch(s, 'play');
+      return s.sfx.start();
+    }
     if (s.ph === 'locked' && time > s.cRdy) lockTurn(s);
     if (s.ph === 'over' && time > s.dl) resetMatch(s, 'attract');
     return;
@@ -2355,11 +2353,6 @@ const drawWorld = (s, time, delta) => {
       drawCell(g, sel.cur.x, sel.cur.y, C_white, 0.15 + 0.15 * blink, 1);
     }
     if (s.ph === 'aim' && a.target === 'dir') {
-      for (const [stick, dir] of Object.entries(STICK_TO_DIR)) {
-        const n = step(me, dir);
-        const p = toIso(n.x, n.y);
-        drawArrow(g, p.x, p.y, stick, dir === sel.dir ? C_white : 0x5a6070);
-      }
       if (sel.act !== 'pivot') {
         const end = previewPlan(me, { act: sel.act, dir: sel.dir }, s.state.us[1]);
         const col = ACTIONS[sel.act].strike ? C_cpu : C_white;
@@ -2378,10 +2371,6 @@ const drawWorld = (s, time, delta) => {
     }
   }
   if (play && s.ph === 'throw') {
-    for (const [stick, dir] of Object.entries(STICK_TO_DIR)) {
-      const p = toIso(me.x + DIRS[dir].dx, me.y + DIRS[dir].dy);
-      drawArrow(g, p.x, p.y, stick, dir === s.thD ? C_white : 0x5a6070);
-    }
     const f = flightOf(me, s.thD, {}, 1);
     f.wp.forEach((c, k) => drawCell(g, c.x, c.y, k === f.wp.length - 1 && f.breaks.length ? C_cpu : C_bolt, 0.15 + 0.15 * blink, 0.8));
   }
