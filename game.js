@@ -119,9 +119,9 @@ const OVER_IDLE_MS = 20000;
 const SPAWNS = '48k8EW6kijEW84g4EWc1clSN9dfcEWec6dWE';
 
 // 0 water · 1 land · 2 bridge · 3 palafito · 4 Catatumbo · 5 void · 6 verdín · 7 oil
-// Deterministic 26×26 Maracaibo silhouette: gulf, northern neck, broad body and southern tip.
-const LAKE_HALF = [4, 4, 3, 2, 1, 2, 8, 8, 7, 7, 8, 8, 9, 9, 9, 9, 8, 8, 7, 7, 6, 5, 4, 2, 0, -1];
-const LAGO_MAP = Array.from({ length: 26 }, (_, y) => Array.from({ length: 26 }, (_, x) => (M_abs(x - 12) <= LAKE_HALF[y] ? 0 : 1)));
+// Deterministic 24×24 Maracaibo silhouette: gulf, northern neck, broad body and southern tip.
+const LAKE_HALF = [4, 3, 2, 1, 2, 8, 8, 7, 7, 8, 8, 9, 9, 9, 9, 8, 8, 7, 7, 6, 5, 4, 2, 0];
+const LAGO_MAP = Array.from({ length: 24 }, (_, y) => Array.from({ length: 24 }, (_, x) => (M_abs(x - 11) <= LAKE_HALF[y] ? 0 : 1)));
 for (const [t, ...p] of [
   [2, 10, 4, 11, 4, 12, 4, 13, 4, 14, 4],
   [3, 5, 6, 19, 16, 20, 17],
