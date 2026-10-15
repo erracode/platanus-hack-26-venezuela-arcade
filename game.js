@@ -58,7 +58,6 @@ const OPPOSITE = { N: 'S', S: 'N', E: 'W', W: 'E' };
 // Combat tuning (ROADMAP.md §3–§4).
 const HP_MAX = 160;
 const STAGE_HP = 25; // each gauntlet stage gives the CPU more max HP
-const STAGE_HEAL = 20; // P1 carries HP between stages and heals this much
 const TOP_KEY = 'catatumbo/top5';
 const SLASH_DMG = 22; // ~7 clean frontal hits to KO
 const LUNGE_DMG = 18;
@@ -116,8 +115,10 @@ const CARD_MS = 3500; // attract-mode how-to-play card rotation
 const ATTRACT_OVER_MS = 2500;
 const OVER_IDLE_MS = 20000;
 
-const P1_START = { x: 4, y: 8, fc: 'E' }; // Costa occidental: Maracaibo
-const CPU_START = { x: 20, y: 8, fc: 'W' }; // Costa oriental: Cabimas
+// Spawns per stage, 6 chars each: P1 x, y, CPU x, y (base 36), P1 facing, CPU facing.
+// Coast to coast, southern lake, bridge ends, gulf vs southern tip, mid-lake oil, boss by the
+// Catatumbo. Aggressive rivals (odd stages, boss) start closer.
+const SPAWNS = '48k8EW6kijEW84g4EWc1clSN9dfcEWec6dWE';
 
 // 0 water · 1 land · 2 bridge · 3 palafito · 4 Catatumbo · 5 void · 6 verdín · 7 oil
 // Deterministic 26×26 Maracaibo silhouette: gulf, northern neck, broad body and southern tip.
@@ -251,8 +252,8 @@ const ACTIONS = {
   dodge: { n: 'ESQUIVA', v: 215, t: Q_TILE, r: 1, i: ['SALTA 1 CASILLA SIN GIRAR', 'MUY RAPIDO: EVITA UN ATAQUE'] },
   tele: { n: 'TELEPORTE', v: 215, t: Q_TILE, r: 3, i: ['SALTA HASTA 5 CASILLAS', '1 CARGA  SI TE GOLPEAN, VUELAS'] },
   pivot: { n: 'GIRAR', v: 215, t: S_DIR, i: ['GIRA HACIA OTRO LADO', 'GIRAR RESTA 60 VEL AL ATAQUE'] },
-  vslash: { n: 'V-SLASH', v: 150, t: S_DIR, k: true, i: ['3 CASILLAS AL FRENTE: 22 DMG', 'X2 DE FLANCO'] },
-  hslash: { n: 'H-SLASH', v: 150, t: S_DIR, k: true, i: ['BARRIDO 3X2: 22 DMG', 'X2 DE FLANCO  ALCANZA DIAGONALES'] },
+  vslash: { n: 'CORTE V', v: 150, t: S_DIR, k: true, i: ['3 CASILLAS AL FRENTE: 22 DMG', 'X2 DE FLANCO'] },
+  hslash: { n: 'CORTE H', v: 150, t: S_DIR, k: true, i: ['BARRIDO 3X2: 22 DMG', 'X2 DE FLANCO  ALCANZA DIAGONALES'] },
   jab: { n: 'JAB', v: 176, t: S_DIR, k: true, i: ['GOLPE RAPIDO: 8 DMG', 'SIN COMBO  CORTA LO MAS LENTO'] },
   lunge: { n: 'EMBESTIDA', v: 210, t: S_DIR, k: true, i: ['CRUZA 3 CASILLAS GOLPEANDO: 18', 'X2 DE FLANCO  REQUIERE IMPULSO'] },
   block: { n: 'ESCUDO', v: 215, t: S_DIR, i: ['BLOQUEA TODO LO FRONTAL', 'TE EMPUJA 1 ATRAS  SIN CASTIGO'] },
@@ -273,16 +274,17 @@ const CLASH_PICKS = ['thrust', A_PARRY, 'feint', A_BURST];
 const CLASH_NAMES = ['ESTOCADA', 'PARRY', 'FINTA', 'BURST'];
 const CLASH_WINS = { parry: ['thrust', A_BURST], thrust: ['feint'], feint: [A_PARRY], burst: ['thrust', 'feint'] };
 
-const newUnit = (start, hp, mx) => {
-  // open: whiffed a parry/grab and must skip the next turn.
-  return { x: start.x, y: start.y, fc: start.fc, hp, mx, g: 0, b: 1, tp: 1, bk: BLOCK_MAX, od: 0, m: false, st: ST_NORMAL, o: false };
+const newUnit = (x, y, fc, hp, mx) => {
+  // open: whiffed a parry/grab and must skip the next turn. Energy starts at half: the orb is ready.
+  return { x, y, fc, hp, mx, g: SP_COST, b: 1, tp: 1, bk: BLOCK_MAX, od: 0, m: false, st: ST_NORMAL, o: false };
 };
 
 const newState = (stage = 1, hp = HP_MAX) => {
   MAP0.forEach((r, y) => (LAGO_MAP[y] = [...r]));
   const mx = HP_MAX + STAGE_HP * (stage - 1);
-  const us = [newUnit(P1_START, hp, HP_MAX), newUnit(CPU_START, mx, mx)];
-  us[1].g = stage > 5 ? GUTS_MAX - 1 : 0; // the boss starts fully charged
+  const [a, b, c, d, e, f] = SPAWNS.substr((stage - 1) % 6 * 6, 6), n = (k) => parseInt(k, 36);
+  const us = [newUnit(n(a), n(b), e, hp, HP_MAX), newUnit(n(c), n(d), f, mx, mx)];
+  if (stage > 5) us[1].g = GUTS_MAX - 1; // the boss starts fully charged
   return { us, t: 1, v: null, k: [], j: stage };
 };
 
@@ -458,8 +460,10 @@ const resolveZone = (s, i, events, rnd = M_random) => {
     return;
   }
   if (zone === 'oil') {
+    // Collected: the slick is gone for the rest of the match.
     gainGuts(u, GUTS_BONUS, events, i);
-    events.push({ t: S_ZONE, w: i, z: tag, dm: 0, g: true, color });
+    LAGO_MAP[u.y][u.x] = 0;
+    events.push({ t: S_ZONE, w: i, z: tag, dm: 0, g: true, color }, { t: 'break', x: u.x, y: u.y });
   }
 };
 
@@ -1749,10 +1753,8 @@ const buildMenu = (u) => {
   return [MOVE_ACTS, combat];
 };
 const CARDS = [
-  // Venue joke: the event sits in Caracas, the game in Maracaibo.
-  ['PLATANUS HACK 26', 'ERRACODE\nCARACAS? NO: MARACAIBO'],
   ['PROGRAMA', 'ELIGE UNA ACCION\nLA MAS RAPIDA VA PRIMERO'],
-  ['CONTROLES', 'PALANCA: MENU / APUNTAR\nB1 CONFIRMAR   B2 VOLVER\nCLASH: B1 ESTOCADA B2 PARRY B3 FINTA'],
+  ['CONTROLES', 'PALANCA: MENU / APUNTAR\nB1 CONFIRMAR   B2 VOLVER'],
 ];
 
 const txt = (scene, x, y, size, color, originX = 0) => {
@@ -1783,8 +1785,8 @@ const createUi = (scene) => {
     // Title screen / stage intro lettering (italic, Virtual-On style).
     big: txt(scene, W / 2, 0, 64, hex(C_gold), 0.5).setFontStyle(BI).setPadding(48, 0),
     big2: txt(scene, W / 2, 0, 36, hex(C_p1), 0.5).setFontStyle(BI).setPadding(32, 0),
-    tag: txt(scene, W / 2, 54, 12, '#02140a', 0.5),
-    vs: [txt(scene, 175, 284, 17, '#fff', 0.5), txt(scene, W / 2, 284, 30, hex(C_gold), 0.5).setFontStyle(BI), txt(scene, 625, 284, 17, '#fff', 0.5)],
+    // Attract-only texts: the VS line, the event tag under the title bar and the soundtrack corner.
+    vs: [txt(scene, 175, 284, 17, '#fff', 0.5), txt(scene, W / 2, 284, 30, hex(C_gold), 0.5).setFontStyle(BI), txt(scene, 625, 284, 17, '#fff', 0.5), txt(scene, W / 2, 54, 12, '#02140a', 0.5), txt(scene, W - 9, H - 9, 10, hex(C_grid), 1)],
     cardT: txt(scene, 263, 340, 12, '#02140a', 0.5),
     card: txt(scene, W / 2, 410, 15, hex(C_grid), 0.5),
     press: txt(scene, W / 2, 520, 30, hex(C_gold), 0.5).setFontStyle(BI),
@@ -1913,12 +1915,12 @@ const clearAsync = (s) => {
   s.flt = [];
 };
 
-// next = continue the gauntlet: same run, next stage, P1 keeps (and heals) its HP.
+// next = continue the gauntlet: same run, next stage, P1 keeps its HP (topped up to 20% if lower).
 const resetMatch = (s, mode, next) => {
   clearAsync(s);
   s.tk++;
   s.md = mode;
-  const hp = next ? M_min(HP_MAX, s.q.us[0].hp + STAGE_HEAL) : HP_MAX;
+  const hp = next ? M_max(HP_MAX / 5, s.q.us[0].hp) : HP_MAX;
   if (!next) {
     s.j = 1;
     s.z = s.rt = 0;
@@ -2070,15 +2072,14 @@ const handleInput = (s, time) => {
     if ((consumePressed(c, 'P1_1') && ++s.ip > 2) || time > s.dl) saveScore(s);
     return;
   }
+  // Clash: the stick moves through the cards like the menu, B1 (or the clock) commits the highlighted one.
   if (s.ph === S_CLASH) {
-    const keys = ['P1_1', 'P1_2', 'P1_3'];
-    if (s.q.us[0].b) keys.push('P1_4');
-    const i = keys.findIndex((k) => consumePressed(c, k));
-    if (i >= 0) {
+    const n = s.q.us[0].b ? 4 : 3;
+    if (consumePressed(c, 'P1_U')) s.ci = (s.ci + n - 1) % n;
+    if (consumePressed(c, 'P1_D')) s.ci = (s.ci + 1) % n;
+    if (consumePressed(c, 'P1_1') || time > s.dl) {
       s.sfx.blip();
-      s.clR(CLASH_PICKS[i]);
-    } else if (time > s.dl) {
-      s.clR(CLASH_PICKS[M_floor(M_random() * 3)]);
+      s.clR(CLASH_PICKS[s.ci]);
     }
     return;
   }
@@ -2236,6 +2237,7 @@ const askClash = (s) => {
   const cpu = cpuClashPick(s.lp, s.q.us[1].b);
   if (s.md !== S_PLAY) return wait(s, 600).then(() => [cpuClashPick(null, s.q.us[0].b), cpu]);
   s.ph = S_CLASH;
+  s.ci = 0;
   s.phS = s.time.now;
   s.dl = s.time.now + CLASH_MS;
   clearPressed(s.c);
@@ -2714,7 +2716,6 @@ const drawHud = (s, time) => {
   let hint = '';
   if (play && aiming && s.ph === S_CHOOSE) {
     ph = 'TURNO ' + s.q.t + '  //  ELIGE ACCION';
-    hint = 'IZQ/DER TIPO   ARR/ABA ACCION   B1 ELEGIR';
   } else if (play && aiming) {
     ph = 'APUNTA // ' + ACTIONS[s.sel.a].n;
     hint = 'PALANCA APUNTA   B1 CONFIRMA   B2 VOLVER';
@@ -2725,7 +2726,7 @@ const drawHud = (s, time) => {
     ph = 'ORDEN FIJADA';
     hint = time > s.cRdy ? 'AMBOS PILOTOS LISTOS' : 'ENEMIGO CIFRADO...';
   } else if (play && s.ph === S_CLASH) {
-    ph = 'CHOQUE DE ESPADAS // RAPIDO';
+    ph = 'CHOQUE // PALANCA ELIGE  B1 CONFIRMA';
     hint = 'PARRY > ESTOCADA > FINTA > PARRY   BURST VENCE ESTOCADA Y FINTA';
   } else if (play && s.ph === Q_THROW) {
     ph = 'OBJETIVO ATRAPADO // LANZA';
@@ -2788,14 +2789,13 @@ const drawHud = (s, time) => {
       const card = side > 0
         ? [{ x: x + cut, y }, { x: x + w, y: y + 4 }, { x: x + w - 12, y: y + 38 }, { x, y: y + 34 }]
         : [{ x, y: y + 4 }, { x: x + w - cut, y }, { x: x + w, y: y + 34 }, { x: x + 12, y: y + 38 }];
-      g.fS(0x010308, 0.97);
+      g.fS(k === s.ci ? 0x8a1430 : 0x010308, 0.97);
       g.fP(card, true);
-      g.lS(4, C_cpu, 1);
+      g.lS(4, k === s.ci ? C_white : C_cpu, 1);
       g.sP(card, true);
       g.lS(1.5, 0xff91a9, 0.8);
       g.lB(x + 15, y + 32, x + 113, y + 35);
       items.push({ kd: S_CLASH, x: x + 76, y: y + 18, l: name });
-      items.push({ kd: 'key', x: x + 137, y: y + 20, l: 'B' + (k + 1) });
     });
   }
 
@@ -2806,7 +2806,7 @@ const drawHud = (s, time) => {
     // Pool objects stay API-minimal for the cabinet harness; geometry carries hierarchy.
     if (it.kd === Q_CAT) drawLabelSlab(g, it.x - 54, it.y - 11, 108, 22, C_p1, it.n);
     if (it.kd === 'act') drawLabelSlab(g, it.x - (it.n ? 59 : 52), it.y - 10, it.n ? 118 : 104, 20, C_p1, it.n);
-    t.setColor(it.n || it.kd === S_CLASH ? '#fff' : it.kd === 'key' ? '#ff9ab1' : it.o ? '#53616a' : it.kd === Q_CAT ? hex(C_coast) : '#dce5e5');
+    t.setColor(it.n || it.kd === S_CLASH ? '#fff' : it.o ? '#53616a' : it.kd === Q_CAT ? hex(C_coast) : '#dce5e5');
     t.setPosition(it.x, it.y);
     setT(t, it.l);
   });
@@ -2908,8 +2908,7 @@ const drawHud = (s, time) => {
   setT(ui.sub, title ? sub : '');
   setT(ui.big, big);
   setT(ui.big2, big2);
-  setT(ui.tag, play ? '' : 'BGM: COQUIVACOA STEEL');
-  ['P1 MARACAIBO', 'VS', 'CPU ' + rival(s)].forEach((t, k) => setT(ui.vs[k], play ? '' : t));
+  ['P1 MARACAIBO', 'VS', 'CPU ' + rival(s), 'PLATANUS HACK 26  CARACAS', 'BGM: COQUIVACOA STEEL'].forEach((t, k) => setT(ui.vs[k], play ? '' : t));
   ne.forEach((t, k) => setT(ui.ne[k], t));
   setT(ui.cardT, card[0]);
   setT(ui.card, card[1]);
