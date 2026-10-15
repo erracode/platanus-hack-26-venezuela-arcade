@@ -1749,8 +1749,10 @@ const buildMenu = (u) => {
   return [MOVE_ACTS, combat];
 };
 const CARDS = [
+  // Venue joke: the event sits in Caracas, the game in Maracaibo.
+  ['PLATANUS HACK 26', 'ERRACODE\nCARACAS? NO: MARACAIBO'],
   ['PROGRAMA', 'ELIGE UNA ACCION\nLA MAS RAPIDA VA PRIMERO'],
-  ['CONTROLES', 'PALANCA  MENU / APUNTAR\nB1  CONFIRMAR     B2  VOLVER\nCLASH  B1 ESTOCADA  B2 PARRY  B3 FINTA'],
+  ['CONTROLES', 'PALANCA: MENU / APUNTAR\nB1 CONFIRMAR   B2 VOLVER\nCLASH: B1 ESTOCADA B2 PARRY B3 FINTA'],
 ];
 
 const txt = (scene, x, y, size, color, originX = 0) => {
@@ -2906,7 +2908,7 @@ const drawHud = (s, time) => {
   setT(ui.sub, title ? sub : '');
   setT(ui.big, big);
   setT(ui.big2, big2);
-  setT(ui.tag, play ? '' : 'BGM: COQUIVACOA STEEL  //  VER 26');
+  setT(ui.tag, play ? '' : 'BGM: COQUIVACOA STEEL');
   ['P1 MARACAIBO', 'VS', 'CPU ' + rival(s)].forEach((t, k) => setT(ui.vs[k], play ? '' : t));
   ne.forEach((t, k) => setT(ui.ne[k], t));
   setT(ui.cardT, card[0]);
