@@ -9,7 +9,7 @@ const { max: M_max, min: M_min, abs: M_abs, random: M_random, sin: M_sin, floor:
 
 // Hot string literals as consts: the minifier gives each a one-letter name.
 const S_MOVE = 'move', S_CLASH = 'clash', S_DIR = 'dir', S_GRAB = 'grab', S_IDLE = 'idle', S_PLAY = 'play', S_STANCE = 'stance', S_KNOCK = 'knock', S_BLOCK = 'block', S_TELE = 'tele', S_WAIT = 'wait', S_AIM = 'aim', S_CHOOSE = 'choose', S_ZONE = 'zone';
-const Q_NONE = 'none', Q_FLASH = 'flash', Q_SHARDS = 'shards', Q_TILE = 'tile', Q_VENT = 'vent', Q_RAYO = 'rayo', Q_CAT = 'cat', Q_LOCKED = 'locked', Q_DODGE = 'dodge', Q_THROW = 'throw', Q_RESOLVE = 'resolve', Q_JAB = 'jab', Q_HIT = 'hit', Q_ORBE = 'orbe', Q_SQUARE = 'square', Q_SAWTOOTH = 'sawtooth';
+const Q_NONE = 'none', Q_FLASH = 'flash', Q_SHARDS = 'shards', Q_TILE = 'tile', Q_VENT = 'vent', Q_RAYO = 'rayo', Q_CAT = 'cat', Q_LOCKED = 'locked', Q_DODGE = 'dodge', Q_THROW = 'throw', Q_RESOLVE = 'resolve', Q_JAB = 'jab', Q_HIT = 'hit', Q_ORBE = 'orbe', Q_CHARGE = 'charge', Q_SQUARE = 'square', Q_SAWTOOTH = 'sawtooth';
 const A_BURST = 'burst', A_VSLASH = 'vslash', A_LUNGE = 'lunge', A_HSLASH = 'hslash', A_PARRY = 'parry', MD_ATTRACT = 'attract';
 
 const W = 800;
@@ -64,14 +64,14 @@ const LUNGE_DMG = 18;
 const JAB_DMG = 8; // quick poke: never advances stance
 const LUNGE_FLANK = 2; // lunge damage multiplier when hitting a side or the back
 const TP_RANGE = 5; // teleport reach (Manhattan tiles)
-const BLOCK_MAX = 5; // shield durability; refills with a full GUTS meter
+const BLOCK_MAX = 3; // limited shield durability; never refills
 const GRAB_DMG = 10;
 const THROW_DMG = 15;
 const SLAM_DMG = 10; // extra when the throw hits land / the edge
 const THROW_DIST = 6; // flying knockback
 const CRASH_DMG = 8; // thrown into a palafito or the bridge: it breaks
 const OIL_DMG = 10; // thrown over oil: it explodes and is consumed
-const GUTS_MAX = 80; // melee damage fills it; a full meter refreshes the BURST charge
+const GUTS_MAX = 120; // a full meter restores special and escape charges
 const GUTS_BONUS = 10; // parry, throw and oil
 const BURST_DMG = 15;
 const OD_TURNS = 5; // overdrive after a burst, counting the burst step itself
@@ -86,13 +86,11 @@ const CLASH_WINDOW = 30; // strikes this close in speed clash
 const ZONE_CHANCE = { cat: 0.35, verdin: 0.4 }; // probability per turn
 const ZONE_VERDIN_DMG = 8; // slip damage
 const ZONE_CAT_DMG = 12; // Catatumbo lightning
-// Specials spend energy (GUTS): the orb half a bar, the aimed bolt more. Storm: chance per turn
-// that the Catatumbo marks a tile near the fight (much higher, and on P1, against the boss).
-const SP_COST = 40;
-const BOLT_COST = 60;
-const SPECIALS = [Q_RAYO, Q_ORBE];
+// Full GUTS restores special charges. Storm may mark a tile near the fight.
+const SPECIALS = [Q_RAYO, Q_ORBE, Q_CHARGE];
 const BOLT_DMG = 25;
 const ORB_DMG = 20;
+const CHARGE_DMG = 30;
 const STORM_CHANCE = 0.06;
 
 // Stance ladder: NORMAL→STAGGERED→KNOCKBACK→DOWN
@@ -248,22 +246,23 @@ const consumePressed = (controls, code) => {
 // A plan is { act, dir } or { act, path }.
 
 const ACTIONS = {
-  move: { n: 'MOVER', v: 160, t: Q_TILE, r: 3, i: ['FRENTE 3 // LADO 2 // ATRAS 1', 'MAS LEJOS = MAS LENTO  3 = IMPULSO'] },
-  dodge: { n: 'ESQUIVA', v: 215, t: Q_TILE, r: 1, i: ['SALTA 1 CASILLA SIN GIRAR', 'MUY RAPIDO: EVITA UN ATAQUE'] },
-  tele: { n: 'TELEPORTE', v: 215, t: Q_TILE, r: 3, i: ['SALTA HASTA 5 CASILLAS', '1 CARGA  SI TE GOLPEAN, VUELAS'] },
-  pivot: { n: 'GIRAR', v: 215, t: S_DIR, i: ['GIRA HACIA OTRO LADO', 'GIRAR RESTA 60 VEL AL ATAQUE'] },
-  vslash: { n: 'CORTE V', v: 150, t: S_DIR, k: true, i: ['3 CASILLAS AL FRENTE: 22 DMG', 'X2 DE FLANCO'] },
-  hslash: { n: 'CORTE H', v: 150, t: S_DIR, k: true, i: ['BARRIDO 3X2: 22 DMG', 'X2 DE FLANCO  ALCANZA DIAGONALES'] },
-  jab: { n: 'JAB', v: 176, t: S_DIR, k: true, i: ['GOLPE RAPIDO: 8 DMG', 'SIN COMBO  CORTA LO MAS LENTO'] },
-  lunge: { n: 'EMBESTIDA', v: 210, t: S_DIR, k: true, i: ['CRUZA 3 CASILLAS GOLPEANDO: 18', 'X2 DE FLANCO  REQUIERE IMPULSO'] },
-  block: { n: 'ESCUDO', v: 215, t: S_DIR, i: ['BLOQUEA TODO LO FRONTAL', 'TE EMPUJA 1 ATRAS  SIN CASTIGO'] },
-  vent: { n: 'REPARAR', v: 165, t: Q_NONE, i: ['ENERGIA A VIDA (4:1)', 'EMPUJA AL RIVAL CERCANO'] },
-  parry: { n: 'PARRY', v: 215, t: S_DIR, i: ['DESVIA ATAQUES FRONTALES', 'SI FALLA: EXPUESTO 1 TURNO'] },
-  grab: { n: 'AGARRE', v: 180, t: S_DIR, i: ['ATRAPA Y LANZA: 25+ DMG', 'IGNORA PARRY  FALLAR = EXPUESTO'] },
-  burst: { n: 'BURST', v: 210, t: Q_NONE, i: ['ROMPE EL RETROCESO + OVERDRIVE', '1 CARGA // SE RECARGA CON ENERGIA'] },
-  wait: { n: 'PASAR', v: 0, t: Q_NONE, i: ['NO HACER NADA', ''] },
-  rayo: { n: 'RAYO OCULTO', v: 140, t: Q_TILE, i: ['60 ENERGIA: ELIGE DONDE CAE', 'EN 2 TURNOS: 25 DMG  NO LO VEN'] },
-  orbe: { n: 'ORBE', v: 130, t: Q_NONE, i: ['40 ENERGIA: PERSIGUE AL RIVAL', '3 TURNOS: 20 DMG'] },
+  move: { n: 'MOVER', v: 160, t: Q_TILE, r: 3, i: ['F3 L2 A1', 'LEJOS=LENTO'] },
+  dodge: { n: 'ESQUIVA', v: 215, t: Q_TILE, r: 1, i: ['SALTA1', 'EVITA GOLPE'] },
+  tele: { n: 'TELEPORTE', v: 215, t: Q_TILE, r: 3, i: ['HASTA5', '1 CARGA'] },
+  pivot: { n: 'GIRAR', v: 215, t: S_DIR, i: ['CAMBIA FRENTE', 'RESTA VEL'] },
+  vslash: { n: 'CORTE V', v: 150, t: S_DIR, k: true, i: ['FRENTE3:22 DMG', 'X2 FLANCO'] },
+  hslash: { n: 'CORTE H', v: 150, t: S_DIR, k: true, i: ['AREA3X2:22 DMG', 'X2 FLANCO'] },
+  jab: { n: 'JAB', v: 176, t: S_DIR, k: true, i: ['8DMG + EMPUJE', 'SIN COMBO'] },
+  lunge: { n: 'EMBESTIDA', v: 210, t: S_DIR, k: true, i: ['AVANZA3:18DMG', 'X2 FLANCO'] },
+  block: { n: 'ESCUDO', v: 215, t: S_DIR, i: ['ALCANCE1', '3USOS NO RECARGA'] },
+  vent: { n: 'REPARAR', v: 165, t: Q_NONE, i: ['CURA=ENER/4', 'EMPUJA'] },
+  parry: { n: 'PARRY', v: 215, t: S_DIR, i: ['ALCANCE2', 'FALLA=EXPUESTO'] },
+  grab: { n: 'AGARRE', v: 180, t: S_DIR, i: ['LANZA25+', 'ANTIPARRY'] },
+  burst: { n: 'BURST', v: 210, t: Q_NONE, i: ['ROMPE RETROCESO', 'OVERDRIVE 1CARGA'] },
+  wait: { n: 'PASAR', v: 0, t: Q_NONE, i: ['', ''] },
+  rayo: { n: 'RAYO OCULTO', v: 140, t: Q_TILE, i: ['1CARGA OCULTO', '25DMG ATURDE T+1'] },
+  orbe: { n: 'ORBE RAYO', v: 130, t: Q_NONE, i: ['2CARGAS SIGUE', '20DMG NO EXPIRA'] },
+  charge: { n: 'CANON SOLAZO', v: 120, t: S_DIR, i: ['1CARGA 4/T', 'CARGA2T 30DMG'] },
 };
 const MOVE_ACTS = [S_MOVE, Q_DODGE, S_TELE, 'pivot', ...SPECIALS];
 const COMBAT_ACTS = [A_VSLASH, A_HSLASH, Q_JAB, A_LUNGE, A_PARRY, S_BLOCK, S_GRAB, Q_VENT];
@@ -275,8 +274,7 @@ const CLASH_NAMES = ['ESTOCADA', 'PARRY', 'FINTA', 'BURST'];
 const CLASH_WINS = { parry: ['thrust', A_BURST], thrust: ['feint'], feint: [A_PARRY], burst: ['thrust', 'feint'] };
 
 const newUnit = (x, y, fc, hp, mx) => {
-  // open: whiffed a parry/grab and must skip the next turn. Energy starts at half: the orb is ready.
-  return { x, y, fc, hp, mx, g: SP_COST, b: 1, tp: 1, bk: BLOCK_MAX, od: 0, m: false, st: ST_NORMAL, o: false };
+  return { x, y, fc, hp, mx, g: 0, b: 1, tp: 1, bk: BLOCK_MAX, or: 2, ry: 1, cs: 1, ch: 0, od: 0, m: false, st: ST_NORMAL, o: false };
 };
 
 const newState = (stage = 1, hp = HP_MAX) => {
@@ -326,19 +324,20 @@ const dirBetween = (a, b) => {
 };
 
 const canUse = (u, act) => {
-  if (act === A_LUNGE) return u.m || u.od > 0;
+  if (act === A_LUNGE) return u.m;
   if (act === S_TELE) return u.tp > 0;
   if (act === S_BLOCK) return u.bk > 0;
   if (act === Q_VENT) return u.g >= 20;
-  if (act === Q_RAYO) return u.g >= BOLT_COST;
-  if (act === Q_ORBE) return u.g >= SP_COST;
-  if (act === A_BURST) return u.st === ST_KNOCKBACK && u.b > 0;
+  if (act === Q_RAYO) return u.ry > 0;
+  if (act === Q_ORBE) return u.or > 0;
+  if (act === Q_CHARGE) return u.cs > 0;
+  if (act === A_BURST) return u.st === ST_KNOCKBACK && u.b > 0 && !u.ch;
   return true;
 };
 
 // NORMAL and STAGGERED units pick actions; KNOCKBACK/DOWN or an open unit cannot.
 const canAct = (u) => {
-  return !u.o && u.st < ST_KNOCKBACK;
+  return !u.o && !u.ch && u.st < ST_KNOCKBACK;
 };
 
 // Each 90° pivot before a strike/parry/grab costs speed; stagger slows everything.
@@ -407,13 +406,13 @@ const previewPlan = (u, plan, other) => {
   return { x: u.x, y: u.y, fc: a.t === S_DIR ? plan.d : u.fc };
 };
 
-// A full meter resets and refreshes every charge (BURST, TELEPORT, shield durability).
+// A full meter resets and refreshes special, BURST and TELEPORT charges.
 const gainGuts = (u, n, events, who) => {
   u.g = M_min(GUTS_MAX, u.g + n);
   if (u.g < GUTS_MAX) return;
   u.g = 0;
-  u.b = u.tp = 1;
-  u.bk = BLOCK_MAX;
+  u.b = u.tp = u.ry = u.cs = 1;
+  u.or = 2;
   events.push({ t: 'refresh', w:who });
 };
 
@@ -510,6 +509,7 @@ const resolveTurn = (state, plans) => {
   const s = cloneState(state);
   const U = s.us;
   const start = U.map((u) => ({ x: u.x, y: u.y, fc: u.fc }));
+  const trail = start.map((u) => [u]);
   const events = [];
   const enteredSt = U.map((u) => u.st);
   U.forEach((u, i) => {
@@ -529,7 +529,7 @@ const resolveTurn = (state, plans) => {
   });
   const spd = p.map((plan, i) => (plan.a === S_WAIT ? 0 : speedOf(U[i], plan)));
   const momentum = [false, false];
-  U.forEach((u, i) => p[i].a === A_LUNGE && !u.od && (u.m = false));
+  U.forEach((u, i) => p[i].a === A_LUNGE && (u.m = false));
   events.push({ t: 'order', a: p.map((x) => x.a), v:spd });
 
   // Clash: equal-speed strikes that reach each other, decided before anyone moves.
@@ -639,6 +639,7 @@ const resolveTurn = (state, plans) => {
     for (const i of acting) {
       if (!walk[i]) continue;
       const wp = walk[i];
+      trail[i].push(...wp);
       if (!wp.length) {
         if (p[i].a !== A_LUNGE) events.push({ t: 'bump', w: i });
         continue;
@@ -673,7 +674,8 @@ const resolveTurn = (state, plans) => {
         events.push({ t: A_BURST, w: i });
       }
       if (SPECIALS.includes(p[i].a)) {
-        me.g -= p[i].a === Q_RAYO ? BOLT_COST : SP_COST;
+        me[p[i].a === Q_ORBE ? 'or' : p[i].a === Q_RAYO ? 'ry' : 'cs']--;
+        if (p[i].a === Q_CHARGE) me.ch = 2;
         cast.push(i);
       }
       if (p[i].a === Q_VENT) {
@@ -717,18 +719,13 @@ const resolveTurn = (state, plans) => {
         events.push({ t: 'miss', w: i });
         continue;
       }
-      if (guard[1 - i] === 2 && relativeSide(foe, at) === 'front') {
+      const gd = guard[1 - i], front = relativeSide(foe, at) === 'front', gdist = dist(foe, at);
+      if (gd === 2 && front && gdist <= 1) {
         foe.bk--;
         events.push({ t: S_BLOCK, w: 1 - i });
-        const to = step(foe, OPPOSITE[foe.fc]);
-        if (isWalkable(to.x, to.y) && !same(to, u)) {
-          foe.x = to.x;
-          foe.y = to.y;
-          events.push({ t: S_KNOCK, w: 1 - i, wp: [to] });
-        }
         continue;
       }
-      if (guard[1 - i] && relativeSide(foe, at) === 'front') {
+      if (gd === 1 && front && gdist <= 2) {
         gainGuts(foe, GUTS_BONUS, events, 1 - i);
         parried[1 - i] = true;
         advanceStance(u); // parried → staggered
@@ -737,8 +734,14 @@ const resolveTurn = (state, plans) => {
         continue;
       }
       if (p[i].a === A_VSLASH || p[i].a === A_HSLASH) strike(i, SLASH_DMG, 2);
-      else if (p[i].a === Q_JAB) strike(i, JAB_DMG, 1, false);
-      else {
+      else if (p[i].a === Q_JAB) {
+        strike(i, JAB_DMG, 1, false);
+        const to = step(foe, u.fc);
+        if (launched !== 1 - i && isWalkable(to.x, to.y)) {
+          foe.x = to.x; foe.y = to.y;
+          events.push({ t: S_KNOCK, w: 1 - i, wp: [to] });
+        }
+      } else {
         strike(i, LUNGE_DMG, LUNGE_FLANK, true, at);
         const to = step(foe, u.fc);
         // Only a charge that stopped in front of the foe shoves it onward.
@@ -794,15 +797,21 @@ const resolveTurn = (state, plans) => {
       events.push({ t: S_STANCE, w: i, st: ST_NORMAL });
     }
     if (p[i].a !== A_LUNGE) u.m = momentum[i];
+    trail[i].push(u);
+    if (u.ch) u.ch--;
     if (momentum[i]) events.push({ t: 'momentum', w: i });
   });
   // Hazards: hidden bolts (shown only to their owner), the chasing orb and the
   // storm's announced bolts (owner 2, they hit anyone).
-  const zap = (j, dm, z) => {
+  const zap = (j, dm, z, ns) => {
     const u = U[j];
     u.hp = M_max(0, u.hp - dm);
-    advanceStance(u);
+    if (!ns) advanceStance(u);
     events.push({ t: S_ZONE, w: j, z, dm, st: u.st, color: ZONE_COLOR.cat });
+  };
+  const boom = (h, dm = ORB_DMG, sq) => {
+    events.push({ t: 'bolt', x: h.x, y: h.y });
+    U.forEach((u, j) => (sq ? trail[j].some((u) => M_max(M_abs(u.x - h.x), M_abs(u.y - h.y)) < 2) : dist(u, h) < 2) && zap(j, dm, 'BOOM!', 1));
   };
   const hz = [];
   for (const h of s.k) {
@@ -811,6 +820,14 @@ const resolveTurn = (state, plans) => {
       if (h.n--) { hz.push(h); continue; }
       events.push({ t: 'bolt', x: h.x, y: h.y });
       U.forEach((u, j) => same(u, h) && zap(j, BOLT_DMG, 'CATATUMBO!'));
+    } else if (h.k === Q_CHARGE) {
+      const d = DIRS[h.d], path = [{ x: h.x, y: h.y }];
+      for (let k = 4; k--;) {
+        h.x += d.dx; h.y += d.dy;
+        path.push({ x: h.x, y: h.y });
+      }
+      h.p = path;
+      hz.push(h);
     } else {
       let hit = 0;
       for (let k = 0; k < 2 && !hit; k++) {
@@ -819,20 +836,48 @@ const resolveTurn = (state, plans) => {
         const t = tileAt(h.x, h.y);
         hit = same(h, f) ? 1 : t === 2 || t === 3 ? 2 : 0;
       }
-      if (hit === 1) zap(1 - h.w, ORB_DMG, 'ORBE!');
-      else if (!hit && --h.n) hz.push(h);
+      if (hit === 1) boom(h);
+      else if (!hit) {
+        const c = hz.findIndex((o) => o.k === Q_ORBE && same(o, h));
+        if (~c) {
+          hz.splice(c, 1);
+          boom(h);
+        } else hz.push(h);
+      }
     }
   }
+  const shots = hz.filter((h) => h.k === Q_CHARGE && h.p), blasts = [];
+  shots.forEach((h) => {
+    const q = h.p.find((q) => trail.some((p) => inTiles(q, p)));
+    if (q) { h.p.length = h.p.indexOf(q) + 1; h.x = q.x; h.y = q.y; h.h = q; }
+  });
+  const meet = (a, b) => a.p.find((t, k) => same(t, b.p[k]) || k && same(t, b.p[k - 1]) && same(a.p[k - 1], b.p[k]));
+  for (let i = 0; i < shots.length; i++) {
+    const a = shots[i];
+    if (a.c) continue;
+    const b = shots.find((b, j) => j > i && !b.c && meet(a, b));
+    if (b) {
+      const q = meet(a, b);
+      a.x = b.x = q.x; a.y = b.y = q.y;
+      a.c = b.c = 1; blasts.push(q);
+    }
+  }
+  shots.forEach((h) => {
+    if (h.h && !h.c) { h.c = 1; blasts.push(h.h); }
+    events.push({ t: Q_CHARGE, w: h.w, x: h.x, y: h.y });
+  });
+  blasts.forEach((q) => boom(q, CHARGE_DMG, 1));
+  shots.forEach((h) => { delete h.p; if (h.c || tileAt(h.x, h.y) === 5) hz.splice(hz.indexOf(h), 1); });
   cast.forEach((i) => {
-    const a = p[i].a, o = a === Q_RAYO ? (p[i].wp || [U[1 - i]])[0] : U[i];
-    hz.push({ k: a, x: o.x, y: o.y, w: i, n: a === Q_ORBE ? 3 : 0 });
+    const a = p[i].a, o = a === Q_RAYO ? (p[i].wp || [U[1 - i]])[0] : a === Q_CHARGE ? frontOf(U[i]) : U[i];
+    hz.push({ k: a, x: o.x, y: o.y, w: i, n: 0, d: U[i].fc });
   });
   const boss = s.j > 5, near = (v, r) => v + M_round((M_random() * 2 - 1) * r);
   if (M_random() < (boss ? 0.12 : STORM_CHANCE)) {
     const o = U[boss || M_random() < 0.5 ? 0 : 1], r = boss ? 2 : 4;
     hz.push({ k: Q_RAYO, x: near(o.x, r), y: near(o.y, r), w: 2, n: 0 });
   }
-  if (boss && M_random() < 0.08) hz.push({ k: Q_ORBE, x: U[1].x, y: U[1].y, w: 1, n: 3 });
+  if (boss && M_random() < 0.08) hz.push({ k: Q_ORBE, x: U[1].x, y: U[1].y, w: 1, n: 0 });
   s.k = hz;
   if (grab === null) finishTurn(s);
   return { q: s, events, clash: false, grab, j:launched };
@@ -986,14 +1031,14 @@ const cpuPlan = (s, i, rnd = M_random) => {
   const outs = () => [...reach(s, i, 1).values()].filter((wp) => !same(wp[0], frontOf(foe)));
 
   // Staggered: too slow to trade, so step out or guard.
-  if (me.st === ST_STAGGERED && dist(me, foe) <= 3 && rnd() < 0.7) {
+  if (me.st === ST_STAGGERED && dist(me, foe) <= 3 && rnd() < 0.8) {
     const o = outs();
-    if (o.length && r < 0.55) return { a: Q_DODGE, wp: pick(o) };
+    if (o.length && r < 0.7) return { a: Q_DODGE, wp: pick(o) };
     if (toFoe) return { a: r < 0.8 ? A_PARRY : Q_JAB, d: toFoe };
   }
 
   // Step off an announced storm mark (hidden bolts stay unseen).
-  if (s.k.some((h) => h.w > 1 && same(h, me)) && rnd() < 0.8) {
+  if (s.k.some((h) => h.w > 1 && same(h, me)) && rnd() < 0.95) {
     const o = outs();
     if (o.length) return { a: Q_DODGE, wp: pick(o) };
   }
@@ -1005,11 +1050,12 @@ const cpuPlan = (s, i, rnd = M_random) => {
   }
 
   if (canUse(me, Q_VENT) && me.g >= 40 && me.hp < me.mx * 0.6 && rnd() < 0.5) return { a: Q_VENT };
-  // Specials, more often deeper in the gauntlet: an aimed bolt on or next to the foe, or an orb.
+  // Use charged specials more often deeper in the gauntlet.
   const fd = dist(me, foe);
-  if (me.g >= SP_COST && rnd() < (s.j > 5 ? 0.3 : 0.1 + s.j * 0.04)) {
-    if (me.g >= BOLT_COST && fd < 6) return { a: Q_RAYO, wp: [rnd() < 0.5 ? foe : step(foe, pick(DIR_KEYS))] };
-    if (fd > 2) return { a: Q_ORBE };
+  if (rnd() < (s.j > 5 ? 0.3 : 0.1 + s.j * 0.04)) {
+    if (canUse(me, Q_RAYO) && fd < 6) return { a: Q_RAYO, wp: [rnd() < 0.5 ? foe : step(foe, pick(DIR_KEYS))] };
+    if (canUse(me, Q_CHARGE) && fd > 3 && (me.x === foe.x || me.y === foe.y)) return { a: Q_CHARGE, d: faceTo(me, foe) };
+    if (canUse(me, Q_ORBE) && fd > 2) return { a: Q_ORBE };
   }
 
   // Chain the combo: if the foe is staggered/knocked/down/open and in vslash range, press it.
@@ -1028,7 +1074,7 @@ const cpuPlan = (s, i, rnd = M_random) => {
     if (r < 0.2) return { a: A_VSLASH, d: toFoe };
     if (r < 0.4) return { a: Q_JAB, d: toFoe };
     if (r < 0.6) return { a: r < 0.5 || !canUse(me, S_BLOCK) ? A_PARRY : S_BLOCK, d: toFoe };
-    if (r < 0.75) return { a: S_GRAB, d: toFoe };
+    if (r < 0.65) return { a: S_GRAB, d: toFoe };
     const o = outs();
     if (o.length) return { a: Q_DODGE, wp: pick(o) };
     return { a: A_PARRY, d: toFoe };
@@ -1382,6 +1428,8 @@ const drawMecha = (g, gx, gy, fc, color, alpha, flash, stance, pose = S_IDLE, fr
       const yy = y - pivot, si = M_sin(a), cs = M_cos(a);
       y = pivot + yy * cs - z * si + lift;
       z = yy * si + z * cs;
+    } else if (pose === Q_CHARGE && (i > 11 && i < 16 || i > 23 && i < 26)) {
+      [y, z] = [63 + z, 63 - y];
     } else if (swing && (i === 13 || i === 15 || i === 17 || i === 25)) {
       if (i === 17) [y, z] = rot(y - 38, z - 2, swing[3]), y += 38, z += 2;
       let u = x - 23, v = y - 63;
@@ -1752,10 +1800,6 @@ const buildMenu = (u) => {
   if (canUse(u, A_BURST)) combat.push(A_BURST);
   return [MOVE_ACTS, combat];
 };
-const CARDS = [
-  ['PROGRAMA', 'ELIGE UNA ACCION\nLA MAS RAPIDA VA PRIMERO'],
-  ['CONTROLES', 'PALANCA: MENU / APUNTAR\nB1 CONFIRMAR   B2 VOLVER'],
-];
 
 const txt = (scene, x, y, size, color, originX = 0) => {
   return scene.add
@@ -1786,12 +1830,11 @@ const createUi = (scene) => {
     big: txt(scene, W / 2, 0, 64, hex(C_gold), 0.5).setFontStyle(BI).setPadding(48, 0),
     big2: txt(scene, W / 2, 0, 36, hex(C_p1), 0.5).setFontStyle(BI).setPadding(32, 0),
     // Attract-only texts: the VS line, the event tag under the title bar and the soundtrack corner.
-    vs: [txt(scene, 175, 284, 17, '#fff', 0.5), txt(scene, W / 2, 284, 30, hex(C_gold), 0.5).setFontStyle(BI), txt(scene, 625, 284, 17, '#fff', 0.5), txt(scene, W / 2, 54, 12, '#02140a', 0.5), txt(scene, W - 9, H - 9, 10, hex(C_grid), 1)],
-    cardT: txt(scene, 263, 340, 12, '#02140a', 0.5),
+    vs: [txt(scene, W / 2, 54, 12, '#02140a', 0.5)],
     card: txt(scene, W / 2, 410, 15, hex(C_grid), 0.5),
     press: txt(scene, W / 2, 520, 30, hex(C_gold), 0.5).setFontStyle(BI),
     // NEXT ENEMY briefing column: code, weapons, arena, mission.
-    ne: [txt(scene, 560, 150, 20, hex(C_grid), 0.5), txt(scene, 560, 290, 17, hex(C_grid), 0.5), txt(scene, 560, 400, 17, hex(C_gold), 0.5), txt(scene, 560, 470, 26, hex(C_grid), 0.5).setFontStyle(BI).setPadding(24, 0)],
+    ne: [txt(scene, 560, 150, 20, hex(C_grid), 0.5), txt(scene, 560, 400, 17, hex(C_gold), 0.5), txt(scene, 560, 470, 26, hex(C_grid), 0.5).setFontStyle(BI).setPadding(24, 0)],
     // Big italic turn clock, seconds plus small hundredths (Virtual-On style).
     tm: txt(scene, 690, 555, 40, hex(C_grid), 1).setFontStyle(BI).setPadding(16, 0),
     tc: txt(scene, 676, 545, 17, hex(C_grid), 0).setFontStyle(BI),
@@ -2264,7 +2307,8 @@ const tweenTo = (s, o, x, y, ms) => {
       entry.tw.stop();
       finish();
     };
-    entry.tw = s.tweens.add({ targets: o, gx: x, gy: y, duration: ms, ease: 'Sine.easeInOut', onComplete: finish });
+    const k = o.k ? '' : 'g';
+    entry.tw = s.tweens.add({ targets: o, [k + 'x']: x, [k + 'y']: y, duration: ms, ease: 'Sine.easeInOut', onComplete: finish });
     s.oTw.push(entry);
   });
 };
@@ -2338,6 +2382,14 @@ const playEvents = async (s, events, token) => {
     } else if (e.t === 'face') {
       u.fc = e.fc;
       await wait(s, 120);
+    } else if (e.t === Q_CHARGE) {
+      let end = ei;
+      while (end < events.length && events[end].t === Q_CHARGE) end++;
+      await Promise.all(events.slice(ei, end).map((m) => {
+        const h = s.q.k.find((h) => h.k === Q_CHARGE && h.w === m.w);
+        return h && tweenTo(s, h, m.x, m.y, STEP_MS * 2);
+      }));
+      ei = end - 1;
     } else if (e.t === S_MOVE) {
       // Consecutive moves in a beat animate together.
       let end = ei;
@@ -2460,7 +2512,7 @@ const playEvents = async (s, events, token) => {
       shake(160, 0.01);
       await wait(s, 250);
     } else if (e.t === 'refresh') {
-      floatText(s, u, 'ENERGIA LLENA! CARGAS LISTAS', C_bolt, 14, 1300);
+      floatText(s, u, 'CARGAS LISTAS', C_bolt, 14, 1300);
       s.sfx.lock();
       await wait(s, 300);
     } else if (e.t === 'open') {
@@ -2549,9 +2601,14 @@ const drawWorld = (s, time, delta) => {
 
   // Live specials: own bolt marks and traps, storm marks, and the orb.
   for (const h of s.q.k) {
-    if (h.k === Q_ORBE) {
+    if (h.k === Q_CHARGE) {
       const o = toIso(h.x, h.y);
-      g.fS(C_bolt, 0.35);
+      g.fS(unitColor(h.w), 0.45);
+      g.fC(o.x, o.y - 18, 24 + 3 * M_sin(time / 70));
+      g.fS(C_white, 0.9); g.fC(o.x, o.y - 18, 11);
+    } else if (h.k === Q_ORBE) {
+      const o = toIso(h.x, h.y);
+      g.fS(0x258cff, 0.45);
       g.fC(o.x, o.y - 18, 13 + 3 * M_sin(time / 80));
       g.fS(C_white, 0.9);
       g.fC(o.x, o.y - 18, 6);
@@ -2611,7 +2668,7 @@ const drawWorld = (s, time, delta) => {
     const pl = s.ph === S_AIM ? s.sel : s.ph === Q_LOCKED && s.pp;
     const guard = !i && play && pl && STRIKE_ACTS.includes(pl.a) && (pl.a === A_HSLASH ? A_HSLASH : A_VSLASH);
     const stance = guard || (s.ph === S_CLASH && A_VSLASH);
-    drawMecha(gu, v.gx, v.gy, guard ? pl.d : v.fc, unitColor(i), 1, v.f, v.st, stance || v.p, stance ? 0 : v.r);
+    drawMecha(gu, v.gx, v.gy, guard ? pl.d : v.fc, unitColor(i), 1, v.f, v.st, s.q.us[i].ch ? Q_CHARGE : stance || v.p, stance ? 0 : v.r);
     const p = toIso(v.gx, v.gy);
     const n = s.vw[1 - i];
     const near = M_abs(v.gx - n.gx) + M_abs(v.gy - n.gy) < 3;
@@ -2692,7 +2749,7 @@ const drawHud = (s, time) => {
     ui.status[i].setPosition(i ? W - 84 : 84, 57);
     setT(ui.names[i], (i ? 'CPU LV' + s.j : 'P1 MARACAIBO') + ' // HP ' + M_max(0, s.dH[i]));
     const stLabel = ST_NAME[u.st] || '';
-    setT(ui.status[i], [stLabel, u.o && 'EXPUESTO', u.od && 'OVERDRIVE ' + u.od, u.m && 'IMPULSO', canUse(u, A_BURST) && 'BURST LISTO'].filter(Boolean).join(' // '));
+    setT(ui.status[i], [stLabel, u.ch && 'CARGA ' + u.ch, u.o && 'EXPUESTO', u.od && 'OVERDRIVE ' + u.od, u.m && 'IMPULSO', canUse(u, A_BURST) && 'BURST LISTO'].filter(Boolean).join(' // '));
   });
 
   // Reserved top-centre action telemetry, clear of both HP panels.
@@ -2705,8 +2762,8 @@ const drawHud = (s, time) => {
     const plan = selPlan(s) || { a: s.sel.a, d: me.fc };
     const available = (canAct(me) || a.t === Q_NONE) && canUse(me, s.sel.a);
     info = available
-      ? [a.n + '  //  VEL ' + speedOf(me, plan) + (s.sel.a === S_BLOCK ? '  ' + me.bk + '/' + BLOCK_MAX : ''), a.i[0], a.i[1]]
-      : [a.n + '  //  BLOQUEADO', s.sel.a === A_LUNGE ? 'REQUIERE IMPULSO: AVANZA 3 ANTES' : 'SIN CARGA: LLENA ENERGIA', ''];
+      ? [a.n + ' VEL ' + speedOf(me, plan) + (s.sel.a === S_BLOCK ? '  ' + me.bk + '/' + BLOCK_MAX : ''), a.i[0], a.i[1]]
+      : [a.n + ' BLOQUEADO', s.sel.a === A_LUNGE ? 'REQUIERE IMPULSO' : 'SIN CARGA', ''];
     drawLabelSlab(g, 244, 9, 312, 56, C_p1, false);
   }
   info.forEach((t, k) => setT(ui.i[k], t));
@@ -2715,33 +2772,33 @@ const drawHud = (s, time) => {
   let ph = '';
   let hint = '';
   if (play && aiming && s.ph === S_CHOOSE) {
-    ph = 'TURNO ' + s.q.t + '  //  ELIGE ACCION';
+    ph = 'T' + s.q.t + '  ELIGE';
   } else if (play && aiming) {
-    ph = 'APUNTA // ' + ACTIONS[s.sel.a].n;
-    hint = 'PALANCA APUNTA   B1 CONFIRMA   B2 VOLVER';
+    ph = 'APUNTA ' + ACTIONS[s.sel.a].n;
+    hint = 'PALANCA  B1 OK  B2 ATRAS';
   } else if (play && s.ph === S_CHOOSE && !canAct(me)) {
-    ph = me.o ? 'EXPUESTO // RECUPERANDO' : ST_NAME[me.st];
-    hint = 'NO PUEDES ACTUAR';
+    ph = me.o ? 'EXPUESTO' : ST_NAME[me.st];
+    hint = 'SIN ACCION';
   } else if (play && s.ph === Q_LOCKED) {
     ph = 'ORDEN FIJADA';
-    hint = time > s.cRdy ? 'AMBOS PILOTOS LISTOS' : 'ENEMIGO CIFRADO...';
+    hint = time > s.cRdy ? 'LISTOS' : 'CPU CIFRADA...';
   } else if (play && s.ph === S_CLASH) {
-    ph = 'CHOQUE // PALANCA ELIGE  B1 CONFIRMA';
-    hint = 'PARRY > ESTOCADA > FINTA > PARRY   BURST VENCE ESTOCADA Y FINTA';
+    ph = 'CHOQUE  PALANCA  B1 OK';
+    hint = 'PARRY>EST>FINTA>PARRY  BURST>EST/FINTA';
   } else if (play && s.ph === Q_THROW) {
-    ph = 'OBJETIVO ATRAPADO // LANZA';
-    hint = 'PALANCA APUNTA   B1 LANZA';
+    ph = 'ATRAPADO // LANZA';
+    hint = 'PALANCA  B1 LANZA';
   } else if (s.ph === Q_RESOLVE) ph = s.bn;
   if (play && !s.tl && s.wa) {
     ph = 'SIGUES AHI?';
-    hint = 'PULSA PARA SEGUIR';
+    hint = 'PULSA';
   } else if (play && aiming) {
     const a = s.sel.a;
     hint = s.ph === S_CHOOSE
-      ? s.rt ? 'MAS VELOCIDAD GOLPEA PRIMERO' : 'PALANCA: ELIGE  B1: CONFIRMA'
-      : STRIKE_ACTS.includes(a) ? 'EL ROJO MARCA TU ALCANCE'
-      : a === A_PARRY ? 'PARRY BLOQUEA DE FRENTE'
-      : a === S_GRAB ? 'EL ESCENARIO TAMBIEN ES UN ARMA' : hint;
+      ? s.rt ? 'MAS VELOCIDAD = PRIMERO' : 'PALANCA ELIGE  B1 OK'
+      : STRIKE_ACTS.includes(a) ? 'ROJO = ALCANCE'
+      : a === A_PARRY ? 'PARRY: FRENTE'
+      : a === S_GRAB ? 'ESCENARIO = ARMA' : hint;
   }
   setT(ui.ph, play ? ph : '');
   setT(ui.hint, hint);
@@ -2845,8 +2902,8 @@ const drawHud = (s, time) => {
   const blinkOn = M_floor(time / 450) % 2 === 0;
   let big = '';
   let big2 = '';
-  let card = ['', ''];
-  let ne = ['', '', '', ''];
+  let card = '';
+  let ne = ['', '', ''];
   s.gWire.clear();
   if (!play) {
     // Title screen: the demo duel runs dimmed behind a CRT grid (arcade VS screen homage).
@@ -2855,13 +2912,7 @@ const drawHud = (s, time) => {
     crtGrid(g, C_grid);
     g.fS(C_grid, 1);
     g.fR(255, 45, 290, 19);
-    g.fR(160, 331, 206, 19);
-    drawChevron(g, 30, 262, 300, 44, C_p1, 1);
-    drawChevron(g, 470, 262, 300, 44, C_cpu, -1);
-    g.lS(3, C_grid, 0.9);
-    g.sP([{ x: 150, y: 340 }, { x: 650, y: 340 }, { x: 650, y: 470 }, { x: 170, y: 470 }, { x: 150, y: 450 }], true);
-    const cards = s.top.length ? [...CARDS, ['MEJORES PILOTOS', s.top.map((e, k) => k + 1 + '. ' + e.n + '  ' + e.s).join('\n')]] : CARDS;
-    card = cards[M_floor((time - s.as) / CARD_MS) % cards.length];
+    card = s.top.length ? 'TOP 5\n' + s.top.map((e, k) => k + 1 + '. ' + e.n + '  ' + e.s).join('\n') : '';
     big = 'CATATUMBO';
     big2 = 'PROTOCOL';
     tint(ui.big, C_gold);
@@ -2884,16 +2935,16 @@ const drawHud = (s, time) => {
     tint(ui.big, C_cpu);
     ui.big.setY(52).setScale(0.8);
     ui.big2.setPosition(560, 205);
-    ne = ['UNIDAD LV' + n, 'VIDA ' + s.q.us[1].mx + '  //  ' + (aggro(n) ? 'AGRESIVO' : 'DEFENSIVO'), '- LAGO DE MARACAIBO -', n > 5 ? 'MISION FINAL' : n + 'A MISION'];
+    ne = ['UNIDAD LV' + n, 'LAGO DE MARACAIBO', n > 5 ? 'MISION FINAL' : n + 'A MISION'];
   } else if (s.ph === 'over') {
     const o = s.q.v;
-    title = o === 'p1' ? (s.j > 5 ? 'PROTOCOLO COMPLETADO' : 'ETAPA ' + s.j + ' SUPERADA') : o === 'cpu' ? 'DERROTA' : 'EMPATE';
+    title = o === 'p1' ? (s.j > 5 ? 'PROTOCOLO LISTO' : 'ETAPA ' + s.j + ' SUPERADA') : o === 'cpu' ? 'DERROTA' : 'EMPATE';
     titleColor = o === 'p1' ? C_p1 : o === 'cpu' ? C_cpu : C_bolt;
-    sub = 'PUNTOS ' + s.z + '\n' + (time > s.phS + ATTRACT_OVER_MS && blinkOn ? (o === 'p1' && s.j < 6 ? 'PULSA START: SIGUIENTE' : 'PULSA START') : ' ');
+    sub = 'PUNTOS ' + s.z + '\n' + (time > s.phS + ATTRACT_OVER_MS && blinkOn ? (o === 'p1' && s.j < 6 ? 'SIGUIENTE' : 'PULSA START') : ' ');
   } else if (s.ph === 'name') {
     title = 'NUEVO RECORD';
     titleColor = C_bolt;
-    sub = 'PUNTOS ' + s.z + '\n' + initials(s.ini).split('').map((ch, k) => (k === s.ip ? '[' + ch + ']' : ' ' + ch + ' ')).join(' ') + '\nARR/ABA LETRA   B1 SIGUIENTE';
+    sub = 'PUNTOS ' + s.z + '\n' + initials(s.ini).split('').map((ch, k) => (k === s.ip ? '[' + ch + ']' : ' ' + ch + ' ')).join(' ') + '\nARR/ABA  B1';
   }
   if (title) {
     drawLabelSlab(g, W / 2 - 222, 112, 444, 52, titleColor, true);
@@ -2908,10 +2959,9 @@ const drawHud = (s, time) => {
   setT(ui.sub, title ? sub : '');
   setT(ui.big, big);
   setT(ui.big2, big2);
-  ['P1 MARACAIBO', 'VS', 'CPU ' + rival(s), 'PLATANUS HACK 26  CARACAS', 'BGM: COQUIVACOA STEEL'].forEach((t, k) => setT(ui.vs[k], play ? '' : t));
+  setT(ui.vs[0], play ? '' : 'PLATANUS HACK 26  CARACAS');
   ne.forEach((t, k) => setT(ui.ne[k], t));
-  setT(ui.cardT, card[0]);
-  setT(ui.card, card[1]);
+  setT(ui.card, card);
   setT(ui.press, !play && blinkOn ? 'PULSA START' : '');
 };
 
