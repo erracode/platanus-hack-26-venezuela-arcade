@@ -1834,7 +1834,7 @@ const createUi = (scene) => {
     card: txt(scene, W / 2, 410, 15, hex(C_grid), 0.5),
     press: txt(scene, W / 2, 520, 30, hex(C_gold), 0.5).setFontStyle(BI),
     // NEXT ENEMY briefing column: code, weapons, arena, mission.
-    ne: [txt(scene, 560, 150, 20, hex(C_grid), 0.5), txt(scene, 560, 400, 17, hex(C_gold), 0.5), txt(scene, 560, 470, 26, hex(C_grid), 0.5).setFontStyle(BI).setPadding(24, 0)],
+    ne: [txt(scene, 560, 150, 20, hex(C_grid), 0.5), txt(scene, 560, 470, 26, hex(C_grid), 0.5).setFontStyle(BI).setPadding(24, 0)],
     // Big italic turn clock, seconds plus small hundredths (Virtual-On style).
     tm: txt(scene, 690, 555, 40, hex(C_grid), 1).setFontStyle(BI).setPadding(16, 0),
     tc: txt(scene, 676, 545, 17, hex(C_grid), 0).setFontStyle(BI),
@@ -2903,7 +2903,7 @@ const drawHud = (s, time) => {
   let big = '';
   let big2 = '';
   let card = '';
-  let ne = ['', '', ''];
+  let ne = ['', ''];
   s.gWire.clear();
   if (!play) {
     // Title screen: the demo duel runs dimmed behind a CRT grid (arcade VS screen homage).
@@ -2935,7 +2935,7 @@ const drawHud = (s, time) => {
     tint(ui.big, C_cpu);
     ui.big.setY(52).setScale(0.8);
     ui.big2.setPosition(560, 205);
-    ne = ['UNIDAD LV' + n, 'LAGO DE MARACAIBO', n > 5 ? 'MISION FINAL' : n + 'A MISION'];
+    ne = ['UNIDAD LV' + n, n > 5 ? 'MISION FINAL' : n + 'A MISION'];
   } else if (s.ph === 'over') {
     const o = s.q.v;
     title = o === 'p1' ? (s.j > 5 ? 'PROTOCOLO LISTO' : 'ETAPA ' + s.j + ' SUPERADA') : o === 'cpu' ? 'DERROTA' : 'EMPATE';
