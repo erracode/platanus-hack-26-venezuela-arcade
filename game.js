@@ -1584,33 +1584,15 @@ const frontEdge = (gx, gy, fc, at) => {
 
 // Z-saber style crescent: a vertical arc for V-SLASH, a wide horizontal arc for H-SLASH.
 const drawSweep = (g, gx, gy, fc, color, a, kd) => {
-  const c = toIso(gx, gy), v = dirVec(fc), sd = dirVec(fc === 'N' || fc === 'S' ? 'E' : 'N');
-  const h = kd === A_HSLASH;
-  const at = (k, w) => {
-    const t = k / 10, th = h ? -1.7 + t * 3.4 : -0.5 + t * 3.1, r = 1 - w * M_sin(t * 3.14);
-    return h
-      ? { x: c.x + (v.x * M_cos(th) + sd.x * M_sin(th)) * r * 1.6, y: c.y - 30 + (v.y * M_cos(th) + sd.y * M_sin(th)) * r * 1.6 }
-      : { x: c.x + v.x * M_sin(th) * r * 1.5, y: c.y - 30 + v.y * M_sin(th) * r * 1.5 - M_cos(th) * r * 42 };
-  };
-  const band = (w) => [...Array(11).keys()].map((k) => at(k, 0)).concat([...Array(11).keys()].reverse().map((k) => at(k, w)));
-  g.fS(color, 0.55 * a);
-  g.fP(band(0.5), true);
-  g.fS(C_white, a);
-  g.fP(band(0.2), true);
+  const [p, q] = frontEdge(gx, gy, fc, kd === A_HSLASH ? 45 : 28);
+  g.lS(9, color, 0.55 * a); g.lB(p.x, p.y - 30, q.x, q.y - 30);
+  g.lS(3, C_white, a); g.lB(p.x, p.y - 30, q.x, q.y - 30);
 };
 
 const drawGuard = (g, gx, gy, fc, a) => {
   const [p, q] = frontEdge(gx, gy, fc, 0.52);
-  const shield = [{ x: p.x, y: p.y - 7 }, { x: q.x, y: q.y - 7 }, { x: q.x + 3, y: q.y - 28 }, { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 - 38 }, { x: p.x - 3, y: p.y - 28 }];
-  g.fS(0x143c54, 0.38 * a);
-  g.fP(shield, true);
-  g.lS(7, C_ink, 0.8 * a);
-  g.sP(shield, false);
-  g.lS(3, C_p1, a);
-  g.sP(shield, false);
-  g.lS(1.5, C_white, 0.9 * a);
-  g.lB(shield[0].x + 3, shield[0].y - 3, shield[3].x, shield[3].y + 5);
-  g.lB(shield[3].x, shield[3].y + 5, shield[1].x - 3, shield[1].y - 3);
+  g.lS(8, C_ink, a); g.lB(p.x, p.y - 18, q.x, q.y - 18);
+  g.lS(4, C_p1, a); g.lB(p.x, p.y - 18, q.x, q.y - 18);
 };
 
 const drawShards = (g, x, y, color, a) => {
