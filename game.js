@@ -264,8 +264,9 @@ const ACTIONS = {
   orbe: { n: 'ORBE RAYO', v: 130, t: Q_NONE, i: ['2CARGAS SIGUE', '20DMG NO EXPIRA'] },
   charge: { n: 'CANON SOLAZO', v: 120, t: S_DIR, i: ['1CARGA 4/T', 'CARGA2T 30DMG'] },
 };
-const MOVE_ACTS = [S_MOVE, Q_DODGE, S_TELE, 'pivot', ...SPECIALS];
-const COMBAT_ACTS = [A_VSLASH, A_HSLASH, Q_JAB, A_LUNGE, A_PARRY, S_BLOCK, S_GRAB, Q_VENT];
+const MOVE_ACTS = [S_MOVE, Q_DODGE, S_TELE, 'pivot'];
+const COMBAT_ACTS = [A_VSLASH, A_HSLASH, Q_JAB, A_LUNGE, A_PARRY, S_BLOCK, S_GRAB];
+const SPECIAL_ACTS = [...SPECIALS, Q_VENT];
 const STRIKE_ACTS = [A_VSLASH, A_HSLASH, Q_JAB, A_LUNGE];
 const WAIT_PLAN = { a: S_WAIT };
 // Clash picks: parry > thrust > feint > parry; burst beats thrust and feint, loses to parry.
@@ -1485,11 +1486,6 @@ const makeBoltPoints = (x, y) => [{ x: x - 25, y: 0 }, { x: x + 15, y: y * 0.35 
 
 const unitColor = (i) => (i ? C_cpu : C_p1);
 
-// "Locked in" check mark above a unit.
-const drawCheck = (g, x, y, color) => {
-  g.lS(3, color, 1); g.lB(x - 5, y, x, y + 5); g.lB(x, y + 5, x + 7, y - 5);
-};
-
 // Small HP bar under a unit.
 const drawMiniBar = (g, x, y, frac, color) => {
   g.fS(0x000000, 0.8);
@@ -1702,14 +1698,13 @@ for (const [k, v] of Object.entries({ fillStyle: 'fS', lineStyle: 'lS', lineBetw
 
 
 const hex = (n) => '#' + n.toString(16).padStart(6, '0');
-const MENU_TITLES = ['TACTICA', 'COMBATE'];
+const MENU_TITLES = ['MOVIMIENTO', 'ATAQUE', 'ESPECIAL'];
+const MENU_COLS = [C_p1, C_cpu, C_bolt];
 
-// Dynamic menu: adds a BURST row to COMBAT when the unit is KNOCKBACK with a charge left.
+// Recovery exposes BURST/PASS from any category; normal play has three focused groups.
 const buildMenu = (u) => {
-  if (!canAct(u)) return [[A_BURST, S_WAIT], [A_BURST, S_WAIT]];
-  const combat = [...COMBAT_ACTS];
-  if (canUse(u, A_BURST)) combat.push(A_BURST);
-  return [MOVE_ACTS, combat];
+  if (!canAct(u)) return [[A_BURST, S_WAIT], [A_BURST, S_WAIT], [A_BURST, S_WAIT]];
+  return [MOVE_ACTS, COMBAT_ACTS, SPECIAL_ACTS];
 };
 
 const txt = (scene, x, y, size, color, originX = 0) => {
@@ -1889,7 +1884,7 @@ const resetMatch = (s, mode, next) => {
   s.lp = null;
   s.clR = null;
   s.thR = null;
-  s.mp = { col: 0, row: 0 };
+  s.mp = { col: 0, row: 0, o: 0 };
   s.wa = 0;
   if (mode === MD_ATTRACT) s.as = s.time.now;
   s.ms = s.time.now;
@@ -1953,8 +1948,9 @@ const beginTurn = (s) => {
   s.dl = s.tl ? now + s.tl + 0 : Infinity;
   if (play && !s.tl) s.id = now + 45000;
   const menu = buildMenu(s.q.us[0]);
-  s.mp.col = M_max(0, M_min(1, s.mp.col));
+  s.mp.col = M_max(0, M_min(2, s.mp.col));
   s.mp.row = M_max(0, M_min(menu[s.mp.col].length - 1, s.mp.row));
+  s.mp.o = !canAct(s.q.us[0]);
   s.sel = { a: menu[s.mp.col][s.mp.row], d: s.q.us[0].fc, cur: null };
 };
 
@@ -2026,7 +2022,7 @@ const handleInput = (s, time) => {
     if ((consumePressed(c, 'P1_1') && ++s.ip > 2) || time > s.dl) saveScore(s);
     return;
   }
-  // Clash: the stick moves through the cards like the menu, B1 (or the clock) commits the highlighted one.
+  // Clash: the stick moves through the cards like the menu; U (or the clock) commits.
   if (s.ph === S_CLASH) {
     const n = s.q.us[0].b ? 4 : 3;
     if (consumePressed(c, 'P1_U')) s.ci = (s.ci + n - 1) % n;
@@ -2067,13 +2063,19 @@ const handleInput = (s, time) => {
     const m = s.mp;
     const fullMenu = buildMenu(me);
     const col = fullMenu[m.col];
-    if (consumePressed(c, 'P1_U')) m.row = (m.row + col.length - 1) % col.length;
-    else if (consumePressed(c, 'P1_D')) m.row = (m.row + 1) % col.length;
-    else if (consumePressed(c, 'P1_L') || consumePressed(c, 'P1_R')) {
-      m.col = 1 - m.col;
-      m.row = M_min(m.row, fullMenu[m.col].length - 1);
-    } else if (consumePressed(c, 'P1_1')) return startAim(s);
-    else return;
+    if (!m.o) {
+      if (consumePressed(c, 'P1_L') || consumePressed(c, 'P1_U')) m.col = (m.col + 2) % 3;
+      else if (consumePressed(c, 'P1_R') || consumePressed(c, 'P1_D')) m.col = (m.col + 1) % 3;
+      else if (consumePressed(c, 'P1_1')) m.o = 1;
+      else return;
+    } else {
+      if (consumePressed(c, 'P1_2')) { m.o = 0; s.sfx.tick(); return; }
+      if (consumePressed(c, 'P1_U')) m.row = (m.row + col.length - 1) % col.length;
+      else if (consumePressed(c, 'P1_D')) m.row = (m.row + 1) % col.length;
+      else if (consumePressed(c, 'P1_1')) return startAim(s);
+      else return;
+    }
+    m.row = M_min(m.row, fullMenu[m.col].length - 1);
     sel.a = fullMenu[m.col][m.row];
     s.sfx.tick();
     return;
@@ -2591,8 +2593,6 @@ const drawWorld = (s, time, delta) => {
     s.ui.tags[i].setPosition(p.x + off, p.y + 25);
     const stName = ['P1', 'CPU'][i] + (v.st ? '  ' + ST_NAME[v.st] : '') + (s.q.us[i].o ? '  EXPUESTO' : '');
     setT(s.ui.tags[i], stName);
-    const ready = i === 0 ? !!s.pp && s.ph === Q_LOCKED : s.ph === Q_LOCKED || (play && (s.ph === S_CHOOSE || s.ph === S_AIM) && time > s.cRdy);
-    if (ready) drawCheck(gu, p.x + 16, p.y - 50, unitColor(i));
   }
 
   const gt = s.gTop;
@@ -2671,7 +2671,7 @@ const drawHud = (s, time) => {
   const me = us[0];
   const intro = play && time - s.ms < INTRO_MS;
   const aiming = play && !intro && (s.ph === S_CHOOSE || s.ph === S_AIM) && (canAct(me) || canUse(me, A_BURST));
-  if (aiming) {
+  if (aiming && (s.ph !== S_CHOOSE || s.mp.o)) {
     const a = ACTIONS[s.sel.a];
     const plan = selPlan(s) || { a: s.sel.a, d: me.fc };
     const available = (canAct(me) || a.t === Q_NONE) && canUse(me, s.sel.a);
@@ -2686,10 +2686,10 @@ const drawHud = (s, time) => {
   let ph = '';
   let hint = '';
   if (play && aiming && s.ph === S_CHOOSE) {
-    ph = 'T' + s.q.t + '  ELIGE';
+    ph = s.mp.o ? 'ELIGE ACCION' : 'ELIGE MENU';
   } else if (play && aiming) {
     ph = 'APUNTA ' + ACTIONS[s.sel.a].n;
-    hint = 'PALANCA  B1 OK  B2 ATRAS';
+    hint = 'U: CONFIRMAR   I: VOLVER';
   } else if (play && s.ph === S_CHOOSE && !canAct(me)) {
     ph = me.o ? 'EXPUESTO' : ST_NAME[me.st];
     hint = 'SIN ACCION';
@@ -2697,11 +2697,11 @@ const drawHud = (s, time) => {
     ph = 'ORDEN FIJADA';
     hint = time > s.cRdy ? 'LISTOS' : 'CPU CIFRADA...';
   } else if (play && s.ph === S_CLASH) {
-    ph = 'CHOQUE  PALANCA  B1 OK';
+    ph = 'CHOQUE // U: CONFIRMAR';
     hint = 'PARRY>EST>FINTA>PARRY  BURST>EST/FINTA';
   } else if (play && s.ph === Q_THROW) {
     ph = 'ATRAPADO // LANZA';
-    hint = 'PALANCA  B1 LANZA';
+    hint = 'U: LANZAR';
   } else if (s.ph === Q_RESOLVE) ph = s.bn;
   if (play && !s.tl && s.wa) {
     ph = 'SIGUES AHI?';
@@ -2709,7 +2709,7 @@ const drawHud = (s, time) => {
   } else if (play && aiming) {
     const a = s.sel.a;
     hint = s.ph === S_CHOOSE
-      ? s.rt ? 'MAS VELOCIDAD = PRIMERO' : 'PALANCA ELIGE  B1 OK'
+      ? s.mp.o ? 'U: ELEGIR   I: VOLVER' : 'U: VER OPCIONES'
       : STRIKE_ACTS.includes(a) ? 'ROJO = ALCANCE'
       : a === A_PARRY ? 'PARRY: FRENTE'
       : a === S_GRAB ? 'ESCENARIO = ARMA' : hint;
@@ -2726,20 +2726,22 @@ const drawHud = (s, time) => {
     // ~32px apart so every plate breathes. The mecha stays visible in the centre.
     const fullMenu = buildMenu(us[0]);
     const col = fullMenu[s.mp.col];
-    const side = s.mp.col ? 1 : -1;
+    const side = s.mp.col === 0 ? -1 : 1;
+    const mc = MENU_COLS[s.mp.col];
     g.fS(0x02070c, 0.35);
     g.fC(cx, cy, 104);
-    arc(cx, cy, 104, 0, 7, C_p1, 1.5, 0.3);
-    arc(cx, cy, 116, side > 0 ? -1.2 : 1.6, side > 0 ? 1.55 : 4.35, C_p1, 4, 0.55);
+    arc(cx, cy, 104, 0, 7, mc, 1.5, 0.3);
+    arc(cx, cy, 116, side > 0 ? -1.2 : 1.6, side > 0 ? 1.55 : 4.35, mc, 4, 0.55);
     if (canAct(us[0])) {
-      items.push({ kd: Q_CAT, x: cx - 78, y: cy - 128, l: MENU_TITLES[0], n: s.mp.col === 0 });
-      items.push({ kd: Q_CAT, x: cx + 78, y: cy - 128, l: MENU_TITLES[1], n: s.mp.col === 1 });
+      [[-78, -128], [78, -128], [0, 128]].forEach((p, k) => items.push({ kd: Q_CAT, x: cx + p[0], y: cy + p[1], l: MENU_TITLES[k], n: s.mp.col === k, c: MENU_COLS[k] }));
     }
-    const stepA = M_min(0.42, 2.5 / col.length);
-    col.forEach((act, ri) => {
-      const a = 0.25 + (ri - (col.length - 1) / 2) * stepA;
-      items.push({ kd: 'act', x: cx + side * M_cos(a) * 132, y: cy + M_sin(a) * 110, l: ACTIONS[act].n, n: s.mp.row === ri, o: !canUse(us[0], act) });
-    });
+    if (s.mp.o) {
+      const stepA = M_min(0.42, 2.5 / col.length);
+      col.forEach((act, ri) => {
+        const a = 0.25 + (ri - (col.length - 1) / 2) * stepA;
+        items.push({ kd: 'act', x: cx + side * M_cos(a) * 132, y: cy + M_sin(a) * 110, l: ACTIONS[act].n, n: s.mp.row === ri, o: !canUse(us[0], act) });
+      });
+    }
   } else if (play && s.ph === S_CLASH) {
     const p = screenPoint(s, toIso((s.vw[0].gx + s.vw[1].gx) / 2, (s.vw[0].gy + s.vw[1].gy) / 2));
     const cx = M_max(120, M_min(W - 120, p.x));
@@ -2775,9 +2777,10 @@ const drawHud = (s, time) => {
     t.setVisible(!!it);
     if (!it) return;
     // Pool objects stay API-minimal for the cabinet harness; geometry carries hierarchy.
-    if (it.kd === Q_CAT) drawLabelSlab(g, it.x - 54, it.y - 11, 108, 22, C_p1, it.n);
-    if (it.kd === 'act') drawLabelSlab(g, it.x - (it.n ? 59 : 52), it.y - 10, it.n ? 118 : 104, 20, C_p1, it.n);
-    t.setColor(it.n || it.kd === S_CLASH ? '#fff' : it.o ? '#53616a' : it.kd === Q_CAT ? hex(C_coast) : '#dce5e5');
+    const color = it.c || MENU_COLS[s.mp.col];
+    if (it.kd === Q_CAT) drawLabelSlab(g, it.x - 54, it.y - 11, 108, 22, color, it.n);
+    if (it.kd === 'act') drawLabelSlab(g, it.x - (it.n ? 59 : 52), it.y - 10, it.n ? 118 : 104, 20, color, it.n);
+    t.setColor(it.n || it.kd === S_CLASH ? '#fff' : it.o ? '#53616a' : it.kd === Q_CAT ? hex(color) : '#dce5e5');
     t.setPosition(it.x, it.y);
     setT(t, it.l);
   });
@@ -2826,7 +2829,7 @@ const drawHud = (s, time) => {
     crtGrid(g, C_grid);
     g.fS(C_grid, 1);
     g.fR(255, 45, 290, 19);
-    card = s.top.length ? 'TOP 5\n' + s.top.map((e, k) => k + 1 + '. ' + e.n + '  ' + e.s).join('\n') : '';
+    card = 'WASD: MOVER Y ELEGIR\nU: ACEPTAR   I: CANCELAR' + (s.top.length ? '\n\nTOP 5\n' + s.top.map((e, k) => k + 1 + '. ' + e.n + '  ' + e.s).join('\n') : '');
     big = 'CATATUMBO';
     big2 = 'PROTOCOL';
     tint(ui.big, C_gold);
@@ -2858,7 +2861,7 @@ const drawHud = (s, time) => {
   } else if (s.ph === 'name') {
     title = 'NUEVO RECORD';
     titleColor = C_bolt;
-    sub = 'PUNTOS ' + s.z + '\n' + initials(s.ini).split('').map((ch, k) => (k === s.ip ? '[' + ch + ']' : ' ' + ch + ' ')).join(' ') + '\nARR/ABA  B1';
+    sub = 'PUNTOS ' + s.z + '\n' + initials(s.ini).split('').map((ch, k) => (k === s.ip ? '[' + ch + ']' : ' ' + ch + ' ')).join(' ') + '\nW/S: LETRA  U: SIGUE';
   }
   if (title) {
     drawLabelSlab(g, W / 2 - 222, 112, 444, 52, titleColor, true);
