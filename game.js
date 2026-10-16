@@ -662,7 +662,7 @@ const resolveTurn = (state, plans) => {
     for (const i of acting) {
       if (p[i].a === A_PARRY || p[i].a === S_BLOCK) {
         guard[i] = p[i].a === A_PARRY ? 1 : 2;
-        events.push({ t: 'guard', w: i });
+        events.push({ t: 'guard', w: i, a: p[i].a });
       }
       const me = U[i];
       const foe = U[1 - i];
@@ -1514,15 +1514,22 @@ const frontEdge = (gx, gy, fc, at) => {
 
 // Z-saber style crescent: a vertical arc for V-SLASH, a wide horizontal arc for H-SLASH.
 const drawSweep = (g, gx, gy, fc, color, a, kd) => {
-  const [p, q] = frontEdge(gx, gy, fc, kd === A_HSLASH ? 45 : 28);
-  g.lS(9, color, 0.55 * a); g.lB(p.x, p.y - 30, q.x, q.y - 30);
-  g.lS(3, C_white, a); g.lB(p.x, p.y - 30, q.x, q.y - 30);
+  const c = toIso(gx, gy), v = dirVec(fc), m = { x: c.x + v.x * 1.3, y: c.y + v.y * 1.3 - 30 };
+  const p = kd === A_HSLASH
+    ? [{ x: m.x + v.y * 2, y: m.y - v.x * 2 }, { x: m.x + v.x * 0.4, y: m.y + v.y * 0.4 - 12 }, { x: m.x - v.y * 2, y: m.y + v.x * 2 }]
+    : [{ x: m.x - 6, y: m.y - 50 }, { x: m.x + v.x * 0.3, y: m.y - 8 }, { x: m.x + 6, y: m.y + 38 }];
+  g.lS(16, color, 0.22 * a); g.sP(p, false);
+  g.lS(7, color, 0.85 * a); g.sP(p, false);
+  g.lS(2, C_white, a); g.sP(p, false);
 };
 
 const drawGuard = (g, gx, gy, fc, a) => {
   const [p, q] = frontEdge(gx, gy, fc, 0.52);
-  g.lS(8, C_ink, a); g.lB(p.x, p.y - 18, q.x, q.y - 18);
-  g.lS(4, C_p1, a); g.lB(p.x, p.y - 18, q.x, q.y - 18);
+  const s = [{ x: p.x, y: p.y - 5 }, { x: q.x, y: q.y - 5 }, { x: q.x, y: q.y - 42 }, { x: p.x, y: p.y - 42 }];
+  g.fS(C_p1, 0.22 * a); g.fP(s, true);
+  g.lS(8, C_ink, 0.7 * a); g.sP(s, true);
+  g.lS(3, C_p1, a); g.sP(s, true);
+  g.lS(1, C_white, a); g.lB(s[0].x, s[0].y, s[2].x, s[2].y);
 };
 
 const drawShards = (g, x, y, color, a) => {
@@ -2340,7 +2347,7 @@ const playEvents = async (s, events, token) => {
       await wait(s, 400);
     } else if (e.t === 'guard') {
       addFx(s, { kd: 'guard', w: e.w, dur: 4000 });
-      u.p = A_HSLASH;
+      u.p = e.a === S_BLOCK ? Q_CHARGE : A_HSLASH;
       u.r = 0;
       s.sfx.blip();
       await wait(s, 250);
@@ -2358,7 +2365,10 @@ const playEvents = async (s, events, token) => {
         await wait(s, 90);
         u.r = 2;
         await wait(s, slash ? 110 : 70);
-      } else await wait(s, 260);
+      } else {
+        u.p = Q_CHARGE;
+        await wait(s, 260);
+      }
     } else if (e.t === 'miss') {
       floatText(s, u, 'FALLO', 0x9aa0b0, 14);
       await wait(s, 350);
