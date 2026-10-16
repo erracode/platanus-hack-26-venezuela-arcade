@@ -1274,53 +1274,16 @@ const drawHut = (g, cx, cy) => {
 
 // Solid cable-stayed Puente General Rafael Urdaneta across the northern strait.
 const drawBridge = (g) => {
-  const row = BRIDGE_ROW;
-  const xs = BRIDGE_XS;
-  const o = toIso(0, row);
-  const e = toIso(1, row);
-  const n = M_hypot(e.x - o.x, e.y - o.y);
-  const nx = (-(e.y - o.y) / n) * 7;
-  const ny = ((e.x - o.x) / n) * 7;
-  // One deck slab per intact tile; the end slabs reach the shore.
-  for (const x of xs) {
-    if (tileAt(x, row) !== 2) continue;
-    const a = toIso(x - (x === xs[0] ? 1 : 0.5), row);
-    const b = toIso(x + (x === xs[xs.length - 1] ? 1 : 0.5), row);
-    const deck = [
-      { x: a.x + nx, y: a.y + ny - DECK_H }, { x: b.x + nx, y: b.y + ny - DECK_H },
-      { x: b.x - nx, y: b.y - ny - DECK_H }, { x: a.x - nx, y: a.y - ny - DECK_H },
-    ];
-    g.fS(0x46545b, 1);
-    g.fP([deck[1], deck[2], { x: deck[2].x, y: deck[2].y + 7 }, { x: deck[1].x, y: deck[1].y + 7 }], true);
-    g.fS(C_concrete, 1);
-    g.fP(deck, true);
-    g.lS(2, C_ink, 1);
-    g.sP(deck, true);
+  const y = BRIDGE_ROW, xs = BRIDGE_XS;
+  for (const x of xs) if (tileAt(x, y) === 2) {
+    const t = toIso(x, y);
+    g.fS(C_concrete, 1); g.fP(cellPts(x, y), true);
+    g.lS(5, 0x26363d, 1); g.lB(t.x, t.y, t.x, t.y + 22);
   }
-
-  for (const x of xs) {
-    if (tileAt(x, row) !== 2) continue;
-    const t = toIso(x, row);
-    g.lS(6, 0x26363d, 1);
-    g.lB(t.x - 1, t.y + 1, t.x, t.y + 22);
-  }
-  for (const x of [xs[0], xs[xs.length - 1]]) {
-    if (tileAt(x, row) !== 2) continue;
-    const t = toIso(x, row);
-    const deckY = t.y - DECK_H;
-    const topY = deckY - TOWER_H;
-    // A-frame pylon and bright stay cables.
-    g.lS(4, C_concrete, 1);
-    g.lB(t.x - 8, deckY, t.x, topY);
-    g.lB(t.x + 8, deckY, t.x, topY);
-    g.lS(1.4, 0xf7f2db, 0.92);
-    for (let k = 1; k <= 2; k++) {
-      const off = (k * TW) / 3;
-      g.lB(t.x, topY + 3, t.x - off, deckY + off / 2);
-      g.lB(t.x, topY + 3, t.x + off, deckY - off / 2);
-    }
-    g.fS(C_bolt, 0.9);
-    g.fC(t.x, topY, 2);
+  for (const x of [xs[0], xs[xs.length - 1]]) if (tileAt(x, y) === 2) {
+    const t = toIso(x, y), top = t.y - 60;
+    g.lS(4, C_concrete, 1); g.lB(t.x - 8, t.y, t.x, top); g.lB(t.x + 8, t.y, t.x, top);
+    g.lS(1.4, 0xf7f2db, 0.92); g.lB(t.x, top, t.x - 45, t.y); g.lB(t.x, top, t.x + 45, t.y);
   }
 };
 
@@ -1343,14 +1306,8 @@ const drawMap = (g) => {
 };
 
 const drawBackground = (g) => {
-  g.fS(C_bg, 1);
-  g.fR(0, 0, WORLD_W, WORLD_H);
-  g.fS(0x0b1b27, 1);
-  g.fR(0, 0, WORLD_W, 390);
-  g.fS(0x102633, 1);
-  g.fP([{ x: 0, y: 300 }, { x: 220, y: 220 }, { x: 430, y: 290 }, { x: 650, y: 200 }, { x: 900, y: 285 }, { x: WORLD_W, y: 220 }, { x: WORLD_W, y: 430 }, { x: 0, y: 430 }], true);
-  g.fS(0x040a10, 1);
-  g.fR(0, 650, WORLD_W, 90);
+  g.fS(C_bg, 1); g.fR(0, 0, WORLD_W, WORLD_H);
+  g.fS(0x0b1b27, 1); g.fR(0, 0, WORLD_W, 390);
 };
 
 // Screen vector from a cell centre to its neighbour in a grid direction.
@@ -1495,16 +1452,8 @@ const drawMecha = (g, gx, gy, fc, color, alpha, flash, stance, pose = S_IDLE, fr
 
 // Angular tactical plate with opposing cuts and a functional accent rail.
 const drawLabelSlab = (g, x, y, w, h, color, selected) => {
-  const cut = M_min(12, h * 0.35);
-  const pts = [{ x: x + cut, y }, { x: x + w, y }, { x: x + w - cut, y: y + h }, { x, y: y + h }, { x: x + 5, y: y + 5 }];
-  g.fS(0x04090f, 0.94);
-  g.fP(pts.map((p) => ({ x: p.x + 3, y: p.y + 4 })), true);
-  g.fS(selected ? 0x142d38 : 0x0d1720, 0.96);
-  g.fP(pts, true);
-  g.lS(selected ? 2.5 : 1.2, selected ? color : 0x50616a, selected ? 1 : 0.72);
-  g.sP(pts, true);
-  g.lS(selected ? 4 : 2, color, selected ? 1 : 0.5);
-  g.lB(x + cut, y, x + M_min(w * 0.42, 78), y);
+  g.fS(selected ? 0x142d38 : 0x0d1720, 0.96); g.fR(x, y, w, h);
+  g.lS(selected ? 4 : 2, color, 1); g.lB(x, y, x + w, y);
 };
 
 // CRT grid over the whole screen.
@@ -1527,37 +1476,18 @@ const drawChevron = (g, x, y, w, h, color, dir) => {
 };
 
 const drawBolt = (g, fx) => {
-  const life = (fx.u - fx.now) / fx.dur;
-  g.lS(16, C_bolt, life * 0.25);
-  g.sP(fx.pts, false);
-  g.lS(6, C_bolt, life);
-  g.sP(fx.pts, false);
-  g.lS(2, C_white, life);
-  g.sP(fx.pts, false);
+  const a = (fx.u - fx.now) / fx.dur;
+  g.lS(7, C_bolt, a); g.sP(fx.pts, false);
+  g.lS(2, C_white, a); g.sP(fx.pts, false);
 };
 
-const makeBoltPoints = (x, y) => {
-  const pts = [{ x: x + (M_random() - 0.5) * 60, y: 0 }];
-  const n = 9;
-  for (let i = 1; i < n; i++) {
-    const t = i / n;
-    pts.push({ x: pts[0].x + (x - pts[0].x) * t + (M_random() - 0.5) * 30, y: y * t });
-  }
-  pts.push({ x, y });
-  return pts;
-};
+const makeBoltPoints = (x, y) => [{ x: x - 25, y: 0 }, { x: x + 15, y: y * 0.35 }, { x: x - 12, y: y * 0.7 }, { x, y }];
 
 const unitColor = (i) => (i ? C_cpu : C_p1);
 
 // "Locked in" check mark above a unit.
 const drawCheck = (g, x, y, color) => {
-  g.fS(0x000000, 0.85);
-  g.fC(x, y, 9);
-  g.lS(2, color, 1);
-  g.strokeCircle(x, y, 9);
-  g.lS(2.5, C_white, 1);
-  g.lB(x - 4, y, x - 1, y + 4);
-  g.lB(x - 1, y + 4, x + 5, y - 4);
+  g.lS(3, color, 1); g.lB(x - 5, y, x, y + 5); g.lB(x, y + 5, x + 7, y - 5);
 };
 
 // Small HP bar under a unit.
@@ -1596,16 +1526,8 @@ const drawGuard = (g, gx, gy, fc, a) => {
 };
 
 const drawShards = (g, x, y, color, a) => {
-  for (let k = 0; k < 8; k++) {
-    const ang = k * 2.399 + 0.3;
-    const r = 19 + (k % 3) * 9;
-    const sx = x + M_cos(ang) * r;
-    const sy = y + M_sin(ang) * r * 0.65;
-    g.lS(2, k & 1 ? color : C_white, a * 0.7);
-    g.lB(x, y, sx, sy);
-    g.fS(k & 1 ? color : C_white, a * (0.55 + (k % 2) * 0.35));
-    g.fillTriangle(sx, sy, sx - M_cos(ang + 0.7) * 9, sy - M_sin(ang + 0.7) * 6, sx - M_cos(ang - 0.5) * 4, sy - M_sin(ang - 0.5) * 4);
-  }
+  g.lS(2, color, a);
+  for (let k = 0; k < 6; k++) g.lB(x, y, x + M_cos(k) * 28, y + M_sin(k) * 18);
 };
 
 // == AUDIO ==
